@@ -1,17 +1,7 @@
 pipeline {
     agent any
 
-    environment {
-        GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        APP_NAME = "maven-web-app"
-        NEXUS_MAVEN_REPO = "http://44.211.221.99:8081/repository/maven-releases/"
-        NEXUS_CRED = credentials('nexus-maven-hub') // username:password format
-        SONAR_SERVER_URL = "http://3.93.23.121:9000"
-    }
-
     stages {
-
-        // 1️⃣ Clone Code from GitHub
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
@@ -19,55 +9,14 @@ pipeline {
                      credentialsId: 'github-credentials'
             }
         }
-
-        // 2️⃣ Build WAR Using Maven
-        stage('Build WAR with Maven') {
-            steps {
-                script {
-                    def mavenHome = tool name: "M3", type: "maven"
-                    sh "${mavenHome}/bin/mvn clean package"
-                }
-            }
-        }
-
-        // 3️⃣ Run SonarQube Analysis
-        stage('SonarQube Analysis') {
-            steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    withSonarQubeEnv('MySonarServer') {
-                        sh """
-                            mvn sonar:sonar \\
-                              -Dsonar.login=\$SONAR_TOKEN \\
-                              -Dsonar.host.url=\$SONAR_SERVER_URL \\
-                              -Dsonar.java.binaries=target/
-                        """
-                    }
-                }
-            }
-        }
-
-        // Optional: Upload WAR to Nexus
-        stage('Upload WAR to Nexus') {
-            steps {
-                nexusArtifactUploader artifacts: [
-                    [artifactId: 'maven-web-app', file: 'target/01-maven-web-app.war', type: 'war']
-                ],
-                credentialsId: 'nexus-maven-hub',
-                groupId: 'com.app.raghu',
-                nexusUrl: '44.211.221.99:8081',
-                protocol: 'http',
-                repository: 'maven-releases',
-                version: "1.0.\${env.BUILD_NUMBER}"
-            }
-        }
     }
 
     post {
         success {
-            echo "✅ SUCCESS: Application built and analyzed!"
+            echo "✅ SUCCESS: Code successfully cloned from GitHub!"
         }
         failure {
-            echo "❌ FAILURE: Build failed"
+            echo "❌ FAILURE: Could not clone from GitHub."
         }
     }
 }
