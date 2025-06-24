@@ -2,30 +2,24 @@ pipeline {
     agent any
 
     environment {
-        // Set environment variables
         GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         APP_NAME = "maven-web-app"
-        IMAGE_NAME = "${APP_NAME}:${GIT_COMMIT}"
-        NEXUS_REGISTRY = "nexus.yourcompany.com:5000"  // Replace with your Nexus Docker registry
-        DOCKER_IMAGE = "${NEXUS_REGISTRY}/${APP_NAME}"
-        
-        // These will be injected from Jenkins credentials (set manually for now)
-        NEXUS_USER = 'your-nexus-user'
-        NEXUS_PASS = 'your-nexus-password'
-        KUBECONFIG_PATH = '/home/jenkins/.kube/config'  // Path to kubeconfig on Jenkins server
+        NEXUS_MAVEN_REPO = "http://<nexus-ip>:8081/repository/maven-releases/"
+        NEXUS_CRED = credentials('nexus-maven-hub') // username:password format
     }
 
     stages {
 
-        // 1️⃣ Clone Code from GitHub
+        // 1️⃣ Clone Code
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
-                     url: 'https://github.com/sunrisers-heroic/maven-web-app.git' 
+                     url: 'https://github.com/sunrisers-heroic/maven-web-app.git', 
+                     credentialsId: 'github-credentials'
             }
         }
 
-        // 2️⃣ Build WAR using Maven
+        // 2️⃣ Build WAR with Maven
         stage('Build WAR with Maven') {
             steps {
                 script {
@@ -38,67 +32,38 @@ pipeline {
         // 3️⃣ Run SonarQube Analysis
         stage('SonarQube Analysis') {
             steps {
-                script {
-                    // Replace with your actual SonarQube token and URL
-                    def SONAR_TOKEN = 'your-sonar-token'
-                    def SONAR_SERVER_URL = 'http://<sonarqube-ip>:9000'
-
-                    sh """
-                        mvn sonar:sonar \\
-                          -Dsonar.login=${SONAR_TOKEN} \\
-                          -Dsonar.host.url=${SONAR_SERVER_URL} \\
-                          -Dsonar.java.binaries=target/
-                    """
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withSonarQubeEnv('MySonarServer') {
+                        sh '''
+                            mvn sonar:sonar \
+                              -Dsonar.login=$SONAR_TOKEN \
+                              -Dsonar.host.url=http://<sonar-ip>:9000 \
+                              -Dsonar.java.binaries=target/
+                        '''
+                    }
                 }
             }
         }
 
-        // 4️⃣ Build Docker Image
-        stage('Build Docker Image') {
+        // Optional: Upload WAR to Nexus
+        stage('Upload WAR to Nexus') {
             steps {
-                sh """
-                    docker build -t ${DOCKER_IMAGE} .
-                """
-            }
-        }
-
-        // 5️⃣ Push to Nexus Docker Registry
-        stage('Push to Nexus Docker Registry') {
-            steps {
-                script {
-                    echo "Logging in to Docker registry..."
-                    sh """
-                        docker login ${NEXUS_REGISTRY} -u ${NEXUS_USER} -p ${NEXUS_PASS}
-                        docker push ${DOCKER_IMAGE}
-                    """
-                }
-            }
-        }
-
-        // 6️⃣ Deploy to Kubernetes (Manual kubectl apply)
-        stage('Deploy to Kubernetes') {
-            steps {
-                script {
-                    echo "Updating Kubernetes deployment with new image..."
-
-                    // Inject KUBECONFIG path
-                    env.KUBECONFIG = "${KUBECONFIG_PATH}"
-
-                    // Replace image in deployment.yaml
-                    sh """
-                        cd k8s
-                        sed -i "s|image: maven-web-app:.*|image: ${DOCKER_IMAGE}|g" deployment.yaml
-                        kubectl apply -f deployment.yaml
-                        kubectl apply -f service.yaml
-                    """
-                }
+                nexusArtifactUploader artifacts: [
+                    [artifactId: 'maven-web-app', file: 'target/01-maven-web-app.war', type: 'war']
+                ],
+                credentialsId: 'nexus-maven-hub',
+                groupId: 'com.app.raghu',
+                nexusUrl: '<nexus-ip>:8081',
+                protocol: 'http',
+                repository: 'maven-releases'
+                version: "1.0.\${env.BUILD_NUMBER}"
             }
         }
     }
 
     post {
         success {
-            echo "✅ SUCCESS: Application deployed to Kubernetes!"
+            echo "✅ SUCCESS: Application built and analyzed!"
         }
         failure {
             echo "❌ FAILURE: Build failed"
