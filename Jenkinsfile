@@ -30,9 +30,10 @@ pipeline {
                     ],
                     credentialsId: 'nexus-maven-hub',
                     groupId: 'com.app.raghu',
-                    nexusUrl: '44.211.221.99:8081',  // Your Nexus server IP
+                    nexusUrl: '44.211.221.99:8081',
                     protocol: 'http',
-                    repository: 'maven-releases'       // Or 'maven-snapshots' for dev builds
+                    repository: 'maven-releases',
+                    version: "1.0.\${env.BUILD_NUMBER}"  // This was missing
                 )
             }
         }
@@ -40,10 +41,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ SUCCESS: Application built and uploaded to Nexus!"
+            echo "✅ SUCCESS: WAR file uploaded to Nexus!"
         }
         failure {
-            echo "❌ FAILURE: Something went wrong during build or upload."
+            echo "❌ FAILURE: Failed to upload to Nexus or build failed."
         }
     }
 }
