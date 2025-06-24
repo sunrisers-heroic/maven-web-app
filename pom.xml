@@ -80,14 +80,14 @@
     </build>
 
     <!-- Distribution Management (Optional: For deploying via mvn deploy) -->
-    <distributionManagement>
-        <repository>
-            <id>nexus-releases</id>
-            <url>http://44.211.221.99:8081/repository/maven-releases/</url>
-        </repository>
-        <snapshotRepository>
-            <id>nexus-snapshots</id>
-            <url>http://44.211.221.99:8081/repository/maven-snapshots/</url>
-        </snapshotRepository>
-    </distributionManagement>
+<distributionManagement>
+    <repository>
+        <id>nexus-releases</id>
+        <url>http://44.211.221.99:8081/repository/maven-releases/</url>
+    </repository>
+    <snapshotRepository>
+        <id>nexus-snapshots</id>
+        <url>http://44.211.221.99:8081/repository/maven-snapshots/</url>
+    </snapshotRepository>
+</distributionManagement>
 </project>
