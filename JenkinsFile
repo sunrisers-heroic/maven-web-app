@@ -2,22 +2,31 @@ pipeline {
     agent any
 
     environment {
+        // Set environment variables
         GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         APP_NAME = "maven-web-app"
         IMAGE_NAME = "${APP_NAME}:${GIT_COMMIT}"
-        NEXUS_REGISTRY = "nexus.yourcompany.com:5000"
+        NEXUS_REGISTRY = "nexus.yourcompany.com:5000"  // Replace with your Nexus Docker registry
         DOCKER_IMAGE = "${NEXUS_REGISTRY}/${APP_NAME}"
+        
+        // These will be injected from Jenkins credentials (set manually for now)
+        NEXUS_USER = 'your-nexus-user'
+        NEXUS_PASS = 'your-nexus-password'
+        KUBECONFIG_PATH = '/home/jenkins/.kube/config'  // Path to kubeconfig on Jenkins server
     }
 
     stages {
-        stage('Clone Repo') {
+
+        // 1️⃣ Clone Code from GitHub
+        stage('Clone Repository') {
             steps {
                 git branch: 'main',
                      url: 'https://github.com/sunrisers-heroic/maven-web-app.git' 
             }
         }
 
-        stage('Maven Build') {
+        // 2️⃣ Build WAR using Maven
+        stage('Build WAR with Maven') {
             steps {
                 script {
                     def mavenHome = tool name: "M3", type: "maven"
@@ -26,20 +35,25 @@ pipeline {
             }
         }
 
+        // 3️⃣ Run SonarQube Analysis
         stage('SonarQube Analysis') {
             steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    withSonarQubeEnv('MySonarServer') {
-                        sh '''
-                            mvn sonar:sonar \
-                              -Dsonar.login=$SONAR_TOKEN \
-                              -Dsonar.host.url=http://<sonar-ip>:9000
-                        '''
-                    }
+                script {
+                    // Replace with your actual SonarQube token and URL
+                    def SONAR_TOKEN = 'your-sonar-token'
+                    def SONAR_SERVER_URL = 'http://<sonarqube-ip>:9000'
+
+                    sh """
+                        mvn sonar:sonar \\
+                          -Dsonar.login=${SONAR_TOKEN} \\
+                          -Dsonar.host.url=${SONAR_SERVER_URL} \\
+                          -Dsonar.java.binaries=target/
+                    """
                 }
             }
         }
 
+        // 4️⃣ Build Docker Image
         stage('Build Docker Image') {
             steps {
                 sh """
@@ -48,32 +62,46 @@ pipeline {
             }
         }
 
+        // 5️⃣ Push to Nexus Docker Registry
         stage('Push to Nexus Docker Registry') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'nexus-docker-hub',
-                    usernameVariable: 'NEXUS_USER',
-                    passwordVariable: 'NEXUS_PASS'
-                )]) {
-                    sh '''
-                        docker login $NEXUS_REGISTRY -u $NEXUS_USER -p $NEXUS_PASS
+                script {
+                    echo "Logging in to Docker registry..."
+                    sh """
+                        docker login ${NEXUS_REGISTRY} -u ${NEXUS_USER} -p ${NEXUS_PASS}
                         docker push ${DOCKER_IMAGE}
-                    '''
+                    """
                 }
             }
         }
 
+        // 6️⃣ Deploy to Kubernetes (Manual kubectl apply)
         stage('Deploy to Kubernetes') {
             steps {
-                withKubeConfig([credentialsId: 'kubeconfig']) {
-                    sh '''
+                script {
+                    echo "Updating Kubernetes deployment with new image..."
+
+                    // Inject KUBECONFIG path
+                    env.KUBECONFIG = "${KUBECONFIG_PATH}"
+
+                    // Replace image in deployment.yaml
+                    sh """
                         cd k8s
                         sed -i "s|image: maven-web-app:.*|image: ${DOCKER_IMAGE}|g" deployment.yaml
                         kubectl apply -f deployment.yaml
                         kubectl apply -f service.yaml
-                    '''
+                    """
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ SUCCESS: Application deployed to Kubernetes!"
+        }
+        failure {
+            echo "❌ FAILURE: Build failed"
         }
     }
 }
