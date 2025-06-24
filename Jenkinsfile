@@ -5,16 +5,8 @@ pipeline {
         // Git commit hash for versioning
         GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         
-        // Artifact version using build number
-        VERSION = "1.0.\${env.BUILD_NUMBER}"
-        
-        // Nexus settings
-        NEXUS_SERVER = "44.211.221.99"
-        NEXUS_PORT = "8081"
-        REPOSITORY = "maven-releases"
-        GROUP_ID = "com.app.raghu"
-        ARTIFACT_ID = "01-maven-web-app"
-        FILE_PATH = "target/01-maven-web-app.war"
+        // Artifact version using build number + git commit
+        VERSION = "1.0-SNAPSHOT"
     }
 
     stages {
@@ -37,18 +29,18 @@ pipeline {
             }
         }
 
-        // Stage 3: Upload WAR to Nexus v3.81
-        stage('Upload WAR to Nexus') {
+        // Stage 3: Upload WAR to Nexus Snapshots
+        stage('Upload WAR to Nexus Snapshots') {
             steps {
                 nexusArtifactUploader(
                     artifacts: [
-                        [artifactId: "${ARTIFACT_ID}", file: "${FILE_PATH}", type: "war"]
+                        [artifactId: '01-maven-web-app', file: 'target/01-maven-web-app.war', type: 'war']
                     ],
-                    credentialsId: "nexus-maven-hub",
-                    groupId: "${GROUP_ID}",
-                    nexusUrl: "${NEXUS_SERVER}:${NEXUS_PORT}",
-                    protocol: "http",
-                    repository: "${REPOSITORY}",
+                    credentialsId: 'nexus-maven-hub',
+                    groupId: 'com.app.raghu',
+                    nexusUrl: '44.211.221.99:8081',
+                    protocol: 'http',
+                    repository: 'maven-snapshots',
                     version: "${VERSION}"
                 )
             }
@@ -57,7 +49,7 @@ pipeline {
 
     post {
         success {
-            echo "✅ SUCCESS: WAR uploaded to Nexus v3.81!"
+            echo "✅ SUCCESS: WAR uploaded to Nexus Snapshots!"
         }
         failure {
             echo "❌ FAILURE: Something went wrong during build or upload."
