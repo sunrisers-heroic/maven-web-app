@@ -4,13 +4,14 @@ pipeline {
     environment {
         GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         APP_NAME = "maven-web-app"
-        NEXUS_MAVEN_REPO = "http://<nexus-ip>:8081/repository/maven-releases/"
+        NEXUS_MAVEN_REPO = "http://44.211.221.99:8081/repository/maven-releases/"
         NEXUS_CRED = credentials('nexus-maven-hub') // username:password format
+        SONAR_SERVER_URL = "http://3.93.23.121:9000"
     }
 
     stages {
 
-        // 1️⃣ Clone Code
+        // 1️⃣ Clone Code from GitHub
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
@@ -19,7 +20,7 @@ pipeline {
             }
         }
 
-        // 2️⃣ Build WAR with Maven
+        // 2️⃣ Build WAR Using Maven
         stage('Build WAR with Maven') {
             steps {
                 script {
@@ -34,12 +35,12 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     withSonarQubeEnv('MySonarServer') {
-                        sh '''
-                            mvn sonar:sonar \
-                              -Dsonar.login=$SONAR_TOKEN \
-                              -Dsonar.host.url=http://<sonar-ip>:9000 \
+                        sh """
+                            mvn sonar:sonar \\
+                              -Dsonar.login=\$SONAR_TOKEN \\
+                              -Dsonar.host.url=\$SONAR_SERVER_URL \\
                               -Dsonar.java.binaries=target/
-                        '''
+                        """
                     }
                 }
             }
@@ -53,9 +54,9 @@ pipeline {
                 ],
                 credentialsId: 'nexus-maven-hub',
                 groupId: 'com.app.raghu',
-                nexusUrl: '<nexus-ip>:8081',
+                nexusUrl: '44.211.221.99:8081',
                 protocol: 'http',
-                repository: 'maven-releases'
+                repository: 'maven-releases',
                 version: "1.0.\${env.BUILD_NUMBER}"
             }
         }
