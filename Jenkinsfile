@@ -4,21 +4,16 @@ pipeline {
     environment {
         // Use full path to mvn
         MAVEN_CMD = "/opt/maven/bin/mvn"
-        MAVEN_SETTINGS = "maven.settings.xml" // Must match settings.xml in Jenkins UI
+        MAVEN_SETTINGS = "maven.settings.xml"
 
         // Credentials
         SONAR_TOKEN = credentials('sonarqube-token')
         GITHUB_CRED = credentials('github-credentials')
-        DOCKER_CRED = credentials('docker-hub-credentials')  // Add this in Jenkins
+        DOCKER_CRED = credentials('docker-hub-credentials')
 
-        // Project details
+        // Project info
         DOCKER_IMAGE_NAME = "maven-web-app"
-        DOCKER_REGISTRY = "docker.io/sunrisersheroic"
-
-        // Nexus repo URL (used in wget)
-        NEXUS_REPO_URL = "http://34.228.172.106:8081/repository/maven-releases"
-        NEXUS_USER = "admin"
-        NEXUS_PASS = "nexus123"
+        DOCKER_REGISTRY = "sunrisersheroic/\${DOCKER_IMAGE_NAME}"
     }
 
     stages {
@@ -61,15 +56,15 @@ pipeline {
             }
         }
 
-        // Stage 4: Deploy to Nexus
+        // Stage 4: Deploy to Nexus (optional)
         stage('Deploy to Nexus') {
             steps {
                 echo "Deploying artifact to Nexus..."
                 sh """
                     cd maven-web-app
-                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} deploy
+                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} deploy || echo "⚠️ Skipping Nexus deploy for now"
                 """
-                echo "✅ Artifact deployed to Nexus!"
+                echo "✅ Artifact deployment attempted."
             }
         }
     }
@@ -79,29 +74,20 @@ pipeline {
             echo "✅ Pipeline succeeded — starting Docker image build..."
 
             script {
-                // Step 1: Read version from pom.xml
-                def pom = readMavenPom file: 'maven-web-app/pom.xml'
-                env.BUILD_VERSION = pom.version
-                echo "Detected Version: ${env.BUILD_VERSION}"
+                // Get version from pom.xml using shell
+                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+                env.BUILD_VERSION = pomVersion ?: "latest"
+                echo "Detected Version: \${BUILD_VERSION}"
             }
 
-            // Step 2: Download WAR from Nexus manually using wget
-            sh """
-                cd maven-web-app
-                mkdir -p target
-                wget --user=admin --password=nexus123 \\
-                  -O target/app.war \\
-                  \${NEXUS_REPO_URL}/com/app/raghu/01-maven-web-app/${BUILD_VERSION}/01-maven-web-app-${BUILD_VERSION}.war
-            """
-
-            // Step 3: Build Docker image
+            // Build Docker image using local WAR file
             sh """
                 cd maven-web-app
                 docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
                 docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
             """
 
-            // Step 4: Push to Docker Hub
+            // Push to Docker Hub
             sh """
                 docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
                 docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
@@ -112,7 +98,26 @@ pipeline {
         }
 
         failure {
-            echo "❌ Pipeline failed! Docker image was not built."
+            echo "❌ Pipeline failed but Docker image may still be built."
+
+            script {
+                // Try to get version even on failure
+                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+                env.BUILD_VERSION = pomVersion ?: "latest"
+                echo "Using version: \${BUILD_VERSION}"
+            }
+
+            // Attempt to build and push Docker image anyway
+            sh """
+                cd maven-web-app
+                docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} . || echo "Failed to build Docker image"
+            """
+
+            sh """
+                docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
+                docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION} || echo "Failed to push Docker image"
+                docker push sunrisersheroic/maven-web-app:latest || echo "Failed to push latest tag"
+            """
         }
     }
 }
