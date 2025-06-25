@@ -2,18 +2,18 @@ pipeline {
     agent any
 
     environment {
-        // Use full path to mvn
-        MAVEN_CMD = "/opt/maven/bin/mvn"
-        MAVEN_SETTINGS = "maven.settings.xml"
+        MAVEN_HOME = tool 'M3'  // Make sure you have Maven installed in Jenkins
+        MAVEN_CMD = "\$MAVEN_HOME/bin/mvn"
+        MAVEN_SETTINGS = "maven.settings.xml"  // Optional if using custom settings
 
         // Credentials
-        SONAR_TOKEN = credentials('sonarqube-token')
         GITHUB_CRED = credentials('github-credentials')
         DOCKER_CRED = credentials('docker-hub-credentials')
 
         // Project info
         DOCKER_IMAGE_NAME = "maven-web-app"
         DOCKER_REGISTRY = "sunrisersheroic/\${DOCKER_IMAGE_NAME}"
+        APP_NAME = "myapp"
     }
 
     stages {
@@ -31,89 +31,102 @@ pipeline {
         }
 
         // Stage 2: Build with Maven
-        stage('Build with Maven') {
+        stage('Build WAR File') {
             steps {
-                echo "Building project with Maven..."
+                echo "Building WAR file with Maven..."
                 sh """
                     cd maven-web-app
                     ${MAVEN_CMD} -s \${MAVEN_SETTINGS} clean package
                 """
-                echo "✅ Build completed!"
+                echo "✅ WAR file generated!"
             }
         }
 
-        // Stage 3: SonarQube Analysis
-        stage('SonarQube Analysis') {
+        // Stage 3: Create Docker Image with WAR
+        stage('Build Docker Image') {
             steps {
-                echo "Running SonarQube analysis..."
-                withSonarQubeEnv('SonarQube') {
-                    sh """
-                        cd maven-web-app
-                        ${MAVEN_CMD} -s \${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
-                    """
+                script {
+                    def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+                    env.BUILD_VERSION = pomVersion ?: "latest"
+                    echo "Detected Version: \${BUILD_VERSION}"
+
+                    env.WAR_FILENAME = sh(script: 'cd maven-web-app && ls target/*.war', returnStdout: true).trim().replaceAll(".*/", "")
+                    echo "WAR file name: \${WAR_FILENAME}"
                 }
-                echo "✅ Code analysis completed!"
-            }
-        }
 
-        // Stage 4: Deploy to Nexus (optional)
-        stage('Deploy to Nexus') {
-            steps {
-                echo "Deploying artifact to Nexus..."
-                sh """
+                echo "Creating Docker image..."
+                sh '''
                     cd maven-web-app
-                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} deploy || echo "⚠️ Skipping Nexus deploy for now"
-                """
-                echo "✅ Artifact deployment attempted."
+
+                    # Write Dockerfile dynamically
+                    cat << EOF > Dockerfile
+FROM tomcat:9.0
+RUN rm -rf /usr/local/tomcat/webapps/*
+COPY target/${WAR_FILENAME} /usr/local/tomcat/webapps/
+EXPOSE 8080
+CMD ["catalina.sh", "run"]
+EOF
+
+                    docker build -t sunrisersheroic/maven-web-app:${BUILD_VERSION} .
+                    docker tag sunrisersheroic/maven-web-app:${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
+                '''
+            }
+        }
+
+        // Stage 4: Push to Docker Hub
+        stage('Push Docker Image') {
+            steps {
+                echo "Logging into Docker Hub..."
+                sh '''
+                    docker login -u $DOCKER_CRED_USR -p $DOCKER_CRED_PSW
+                    docker push sunrisersheroic/maven-web-app:${BUILD_VERSION}
+                    docker push sunrisersheroic/maven-web-app:latest
+                '''
+                echo "✅ Docker image pushed to Docker Hub"
+            }
+        }
+
+        // Stage 5: Deploy Locally or Remotely via SSH
+        stage('Deploy Docker Container') {
+            when {
+                expression { env.DEPLOY == "true" }  // Only deploy if triggered manually
+            }
+            steps {
+                script {
+                    sshagent(['docker-server-ssh']) {
+                        sh '''
+                            echo "Connecting to Docker server..."
+
+                            ssh -o StrictHostKeyChecking=no ec2-user@<your-docker-server-ip> << 'SSH_EOF'
+                                echo "Removing old containers..."
+                                docker stop maven-web-app || true
+                                docker rm maven-web-app || true
+
+                                echo "Pulling latest WAR image..."
+                                docker pull sunrisersheroic/maven-web-app:latest
+
+                                echo "Starting new WAR container..."
+                                docker run -d \
+                                    --name maven-web-app \
+                                    -p 8090:8080 \
+                                    sunrisersheroic/maven-web-app:latest
+
+                                echo "Container logs:"
+                                docker logs maven-web-app
+SSH_EOF
+                        '''
+                    }
+                }
             }
         }
     }
 
-   post {
-    success {
-        echo "✅ Pipeline succeeded — starting Docker image build..."
-
-        script {
-            // Manually extract version from pom.xml using shell
-            def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
-            env.BUILD_VERSION = pomVersion ?: "latest"
-            echo "Detected Version: \${BUILD_VERSION}"
+    post {
+        success {
+            echo "✅ Pipeline succeeded — WAR and Docker image created!"
         }
-
-        // Build Docker image using local WAR file
-        sh """
-            cd maven-web-app
-            docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
-            docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
-        """
-
-        // Push to Docker Hub
-        sh """
-            docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
-            docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
-            docker push sunrisersheroic/maven-web-app:latest
-        """
-
-        echo "✅ Docker image pushed to Docker Hub!"
-    }
-
-    failure {
-        echo "❌ Pipeline failed but attempting fallback Docker build..."
-        
-        script {
-            // Try to get version even after failure
-            def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
-            env.BUILD_VERSION = pomVersion ?: "latest"
-            echo "Using version: \${BUILD_VERSION}"
+        failure {
+            echo "❌ Pipeline failed but WAR/Docker image may still exist locally."
         }
-
-        // Attempt fallback Docker build
-        sh """
-            cd maven-web-app
-            docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} . || echo "Failed to build Docker image"
-        """
-
-        echo "⚠️ If Docker build failed, check logs above"
     }
-}
 }
