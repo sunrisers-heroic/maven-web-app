@@ -69,55 +69,51 @@ pipeline {
         }
     }
 
-    post {
-        success {
-            echo "✅ Pipeline succeeded — starting Docker image build..."
+   post {
+    success {
+        echo "✅ Pipeline succeeded — starting Docker image build..."
 
-            script {
-                // Get version from pom.xml using shell
-                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
-                env.BUILD_VERSION = pomVersion ?: "latest"
-                echo "Detected Version: \${BUILD_VERSION}"
-            }
-
-            // Build Docker image using local WAR file
-            sh """
-                cd maven-web-app
-                docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
-                docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
-            """
-
-            // Push to Docker Hub
-            sh """
-                docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
-                docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
-                docker push sunrisersheroic/maven-web-app:latest
-            """
-
-            echo "✅ Docker image pushed to Docker Hub!"
+        script {
+            // Manually extract version from pom.xml using shell
+            def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+            env.BUILD_VERSION = pomVersion ?: "latest"
+            echo "Detected Version: \${BUILD_VERSION}"
         }
 
-        failure {
-            echo "❌ Pipeline failed but Docker image may still be built."
+        // Build Docker image using local WAR file
+        sh """
+            cd maven-web-app
+            docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
+            docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
+        """
 
-            script {
-                // Try to get version even on failure
-                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
-                env.BUILD_VERSION = pomVersion ?: "latest"
-                echo "Using version: \${BUILD_VERSION}"
-            }
+        // Push to Docker Hub
+        sh """
+            docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
+            docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
+            docker push sunrisersheroic/maven-web-app:latest
+        """
 
-            // Attempt to build and push Docker image anyway
-            sh """
-                cd maven-web-app
-                docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} . || echo "Failed to build Docker image"
-            """
-
-            sh """
-                docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
-                docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION} || echo "Failed to push Docker image"
-                docker push sunrisersheroic/maven-web-app:latest || echo "Failed to push latest tag"
-            """
-        }
+        echo "✅ Docker image pushed to Docker Hub!"
     }
+
+    failure {
+        echo "❌ Pipeline failed but attempting fallback Docker build..."
+        
+        script {
+            // Try to get version even after failure
+            def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+            env.BUILD_VERSION = pomVersion ?: "latest"
+            echo "Using version: \${BUILD_VERSION}"
+        }
+
+        // Attempt fallback Docker build
+        sh """
+            cd maven-web-app
+            docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} . || echo "Failed to build Docker image"
+        """
+
+        echo "⚠️ If Docker build failed, check logs above"
+    }
+}
 }
