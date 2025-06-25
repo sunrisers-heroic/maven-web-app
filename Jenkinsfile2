@@ -1,0 +1,54 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_CRED = credentials('docker-hub-credentials')
+        KUBECONFIG_CRED = credentials('kubeconfig-credentials')
+    }
+
+    stages {
+        stage('Clone Repo') {
+            steps {
+                git branch: 'main', url: 'https://github.com/yourname/yourrepo.git' 
+            }
+        }
+
+        stage('Login to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
+                                                  passwordVariable: 'DOCKER_PASS',
+                                                  usernameVariable: 'DOCKER_USER')]) {
+                    sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
+                }
+            }
+        }
+
+        stage('Pull Docker Image') {
+            steps {
+                sh 'docker pull sunrisersheroic/maven-web-app:latest'
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-credentials']) {
+                    sh """
+                        kubectl apply -f deployment.yaml
+                        kubectl apply -f service.yaml
+                        kubectl rollout status deployment/tomcat-app
+                        kubectl get pods,svc
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Deployment successful!'
+        }
+        failure {
+            echo '❌ Deployment failed!'
+        }
+    }
+}
