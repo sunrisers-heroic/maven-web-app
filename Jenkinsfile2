@@ -2,71 +2,54 @@ pipeline {
     agent any
 
     environment {
-        // Use kubeconfig for kubectl access
-        KUBECONFIG_CRED = credentials('kubeconfig-credentials')
-
-        // Use Docker Hub credential
+        // Use credentials from Jenkins
         DOCKER_USER = credentials('docker-hub-credentials').getUsername()
         DOCKER_PASS = credentials('docker-hub-credentials').getPassword()
     }
 
     stages {
-        stage('Clone Repository') {
+        stage('Clone Repo') {
             steps {
                 git branch: 'main', url: 'https://github.com/yourname/yourrepo.git' 
             }
         }
 
-        stage('Login to Docker Hub') {
+        stage('Login to Docker Hub (Optional)') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
-                                                  passwordVariable: 'DOCKER_PASS',
-                                                  usernameVariable: 'DOCKER_USER')]) {
+                                                passwordVariable: 'DOCKER_PASS',
+                                                usernameVariable: 'DOCKER_USER')]) {
                     sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
                 }
             }
         }
 
-        stage('Pull Docker Image') {
+        stage('Deploy to Docker Server') {
             steps {
-                sh 'docker pull sunrisersheroic/maven-web-app:latest'
-            }
-        }
+                sshagent(['docker-server-ssh']) { // Replace with your SSH credential ID
+                    sh '''
+                        echo "Connecting to Docker server at 52.23.196.95..."
 
-        stage('Deploy to Kubernetes') {
-            steps {
-                script {
-                    try {
-                        // Try using kubeconfig first (recommended)
-                        echo "Attempting to deploy using kubeconfig..."
-                        withKubeConfig([credentialsId: 'kubeconfig-credentials']) {
-                            sh """
-                                kubectl apply -f k8s/deployment.yaml
-                                kubectl apply -f k8s/service.yaml
-                                kubectl rollout status deployment/maven-web-app --timeout=60s
-                                kubectl get pods,svc
-                            """
-                        }
-                    } catch (Exception e) {
-                        echo "kubeconfig method failed: ${e}. Falling back to SSH..."
+                        # SSH into the Docker host and run commands
+                        ssh -o StrictHostKeyChecking=no ec2-user@52.23.196.95 << 'EOF'
 
-                        // Fallback: SSH into Kubernetes master node
-                        sshagent(['k8s-master-ssh']) {
-                            sh '''
-                                ssh -o StrictHostKeyChecking=no ubuntu@34.226.120.72 << 'ENDSSH'
-                                    cd /home/ubuntu || exit
-                                    echo "Copying deployment files..."
-                                    cp ~/jenkins-workspace/workspace/your-pipeline-name/k8s/* ./
+                            echo "Stopping existing container..."
+                            docker stop maven-web-app || true
+                            docker rm maven-web-app || true
 
-                                    echo "Applying Kubernetes manifests..."
-                                    kubectl apply -f deployment.yaml
-                                    kubectl apply -f service.yaml
-                                    kubectl rollout status deployment/maven-web-app --timeout=60s
-                                    kubectl get pods,svc
-                                ENDSSH
-                            '''
-                        }
-                    }
+                            echo "Pulling latest image..."
+                            docker pull sunrisersheroic/maven-web-app:latest
+
+                            echo "Running new container..."
+                            docker run -d \
+                                --name maven-web-app \
+                                -p 8090:8080 \
+                                sunrisersheroic/maven-web-app:latest
+
+                            echo "Container is running on port 8090"
+                            docker ps
+                        EOF
+                    '''
                 }
             }
         }
@@ -74,12 +57,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment successful!"
-            slackSend channel: '#deployments', color: '#00FF00', message: "Deployment to Kubernetes succeeded!"
+            echo '✅ Deployment successful!'
         }
         failure {
-            echo "❌ Deployment failed!"
-            slackSend channel: '#deployments', color: '#FF0000', message: "Deployment to Kubernetes failed!"
+            echo '❌ Deployment failed!'
         }
     }
 }
