@@ -1,12 +1,6 @@
 pipeline {
     agent any
 
-    environment {
-        // Use credentials from Jenkins
-        DOCKER_USER = credentials('docker-hub-credentials').getUsername()
-        DOCKER_PASS = credentials('docker-hub-credentials').getPassword()
-    }
-
     stages {
         stage('Clone Repo') {
             steps {
@@ -60,7 +54,7 @@ pipeline {
             echo '✅ Deployment successful!'
         }
         failure {
-            echo '❌ Deployment failed!'
+            echo '❌ Deployment failed! Check logs for details.'
         }
     }
 }
