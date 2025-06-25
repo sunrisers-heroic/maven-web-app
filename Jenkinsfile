@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        // Use the Maven settings defined in Jenkins: "Mysettingsmaven"
-        MAVEN_SETTINGS = "MySettingsMaven"
+        // Name of the settings.xml file you uploaded in Jenkins UI
+        MAVEN_SETTINGS = "settings.xml"
 
         // Credentials from Jenkins Credentials Store
         SONAR_TOKEN = credentials('sonarqube-token') // Secret text credential ID
@@ -30,7 +30,7 @@ pipeline {
         // Stage 2: Build with Maven
         stage('Build with Maven') {
             steps {
-                echo "Building project with Maven using Mysettingsmaven..."
+                echo "Building project with Maven using custom settings..."
                 sh """
                     cd maven-web-app
                     mvn -s \${MAVEN_SETTINGS} clean package
@@ -42,7 +42,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 echo "Running SonarQube analysis..."
-                withSonarQubeEnv('SonarQube') { // 'SonarQube' must match server name in Jenkins config
+                withSonarQubeEnv('SonarQube') { // Ensure this matches your Sonar server name
                     sh """
                         cd maven-web-app
                         mvn -s \${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
