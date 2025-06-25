@@ -1,27 +1,24 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- Project Info -->
     <groupId>com.app.raghu</groupId>
     <artifactId>01-maven-web-app</artifactId>
     <version>1.0.0</version>
-    <packaging>war</packaging>
-    <name>Maven Web Application</name>
-    <url>http://maven.apache.org</url>
+    <packaging>jar</packaging>
 
-    <!-- Properties -->
+    <name>Maven Web App</name>
+
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <!-- Dependencies -->
     <dependencies>
-        <!-- JUnit for Testing -->
+        <!-- Example dependency -->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -30,59 +27,25 @@
         </dependency>
     </dependencies>
 
-    <!-- Build Configuration -->
+    <!-- Build Plugins -->
     <build>
-        <finalName>01-maven-web-app</finalName>
-
         <plugins>
-            <!-- Maven Compiler Plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>3.8.6</version>
                 <configuration>
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                 </configuration>
             </plugin>
 
-            <!-- Maven WAR Plugin -->
+            <!-- Optional: Add this if using SonarQube -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-war-plugin</artifactId>
-                <version>3.4.0</version>
-                <configuration>
-                    <failOnMissingWebXml>false</failOnMissingWebXml>
-                </configuration>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>3.9.1.2184</version>
             </plugin>
-
-            <!-- Maven Deploy Plugin -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-deploy-plugin</artifactId>
-                <version>3.1.0</version>
-            </plugin>
-
-                 <plugins>
-    <plugin>
-        <groupId>org.sonarsource.scanner.maven</groupId>
-        <artifactId>sonar-maven-plugin</artifactId>
-        <version>3.9.1.2184</version>
-    </plugin>
-</plugins>
-                 
         </plugins>
     </build>
-
-    <!-- Distribution Management: Nexus Integration -->
-    <distributionManagement>
-    <repository>
-        <id>nexus-releases</id>
-        <url>http://3.95.151.6:8081/repository/maven-releases/</url>
-    </repository>
-    <snapshotRepository>
-        <id>nexus-snapshots</id>
-        <url>http://3.95.151.6:8081/repository/maven-snapshots/</url>
-    </snapshotRepository>
-</distributionManagement>
 </project>
