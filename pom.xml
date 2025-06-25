@@ -6,8 +6,9 @@
     <!-- Project Info -->
     <groupId>com.app.raghu</groupId>
     <artifactId>01-maven-web-app</artifactId>
-    <version>1.0.3</version>
+    <version>1.0.4</version>
     <packaging>jar</packaging>
+          <packaging>war</packaging>
 
     <name>01-maven-web-app</name>
     <url>http://maven.apache.org</url>
