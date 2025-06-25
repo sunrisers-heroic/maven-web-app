@@ -6,7 +6,7 @@
     <!-- Project Info -->
     <groupId>com.app.raghu</groupId>
     <artifactId>01-maven-web-app</artifactId>
-    <version>1.0.5</version>
+    <version>1.0.6</version>
           <packaging>war</packaging>
 
     <name>01-maven-web-app</name>
