@@ -2,12 +2,16 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_CRED = credentials('docker-hub-credentials')
+        // Use kubeconfig for kubectl access
         KUBECONFIG_CRED = credentials('kubeconfig-credentials')
+
+        // Use Docker Hub credential
+        DOCKER_USER = credentials('docker-hub-credentials').getUsername()
+        DOCKER_PASS = credentials('docker-hub-credentials').getPassword()
     }
 
     stages {
-        stage('Clone Repo') {
+        stage('Clone Repository') {
             steps {
                 git branch: 'main', url: 'https://github.com/yourname/yourrepo.git' 
             }
@@ -31,13 +35,38 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withKubeConfig([credentialsId: 'kubeconfig-credentials']) {
-                    sh """
-                        kubectl apply -f deployment.yaml
-                        kubectl apply -f service.yaml
-                        kubectl rollout status deployment/tomcat-app
-                        kubectl get pods,svc
-                    """
+                script {
+                    try {
+                        // Try using kubeconfig first (recommended)
+                        echo "Attempting to deploy using kubeconfig..."
+                        withKubeConfig([credentialsId: 'kubeconfig-credentials']) {
+                            sh """
+                                kubectl apply -f k8s/deployment.yaml
+                                kubectl apply -f k8s/service.yaml
+                                kubectl rollout status deployment/maven-web-app --timeout=60s
+                                kubectl get pods,svc
+                            """
+                        }
+                    } catch (Exception e) {
+                        echo "kubeconfig method failed: ${e}. Falling back to SSH..."
+
+                        // Fallback: SSH into Kubernetes master node
+                        sshagent(['k8s-master-ssh']) {
+                            sh '''
+                                ssh -o StrictHostKeyChecking=no ubuntu@34.226.120.72 << 'ENDSSH'
+                                    cd /home/ubuntu || exit
+                                    echo "Copying deployment files..."
+                                    cp ~/jenkins-workspace/workspace/your-pipeline-name/k8s/* ./
+
+                                    echo "Applying Kubernetes manifests..."
+                                    kubectl apply -f deployment.yaml
+                                    kubectl apply -f service.yaml
+                                    kubectl rollout status deployment/maven-web-app --timeout=60s
+                                    kubectl get pods,svc
+                                ENDSSH
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -45,10 +74,12 @@ pipeline {
 
     post {
         success {
-            echo '✅ Deployment successful!'
+            echo "✅ Deployment successful!"
+            slackSend channel: '#deployments', color: '#00FF00', message: "Deployment to Kubernetes succeeded!"
         }
         failure {
-            echo '❌ Deployment failed!'
+            echo "❌ Deployment failed!"
+            slackSend channel: '#deployments', color: '#FF0000', message: "Deployment to Kubernetes failed!"
         }
     }
 }
