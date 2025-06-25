@@ -2,39 +2,29 @@ pipeline {
     agent any
 
     stages {
-        stage('Clone Repo') {
+        stage('Clone Repo (Optional)') {
             steps {
                 git branch: 'main', url: 'https://github.com/yourname/yourrepo.git' 
             }
         }
 
-        stage('Login to Docker Hub (Optional)') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
-                                                passwordVariable: 'DOCKER_PASS',
-                                                usernameVariable: 'DOCKER_USER')]) {
-                    sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
-                }
-            }
-        }
-
         stage('Deploy to Docker Server') {
             steps {
-                sshagent(['docker-server-ssh']) { // Replace with your SSH credential ID
+                sshagent(['docker-server-ssh']) { // Use the ID you set for the SSH credential
                     sh '''
                         echo "Connecting to Docker server at 52.23.196.95..."
 
-                        # SSH into the Docker host and run commands
+                        # Run commands on the Docker server
                         ssh -o StrictHostKeyChecking=no ec2-user@52.23.196.95 << 'EOF'
 
-                            echo "Stopping existing container..."
+                            echo "Stopping and removing existing container..."
                             docker stop maven-web-app || true
                             docker rm maven-web-app || true
 
-                            echo "Pulling latest image..."
+                            echo "Pulling latest Docker image..."
                             docker pull sunrisersheroic/maven-web-app:latest
 
-                            echo "Running new container..."
+                            echo "Starting new container..."
                             docker run -d \
                                 --name maven-web-app \
                                 -p 8090:8080 \
