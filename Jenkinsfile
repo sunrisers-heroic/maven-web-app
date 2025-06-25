@@ -2,57 +2,56 @@ pipeline {
     agent any
 
     environment {
-        // Git commit hash for versioning
-        GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        
-        // Artifact version using build number + git commit
-        VERSION = "1.0-SNAPSHOT"
+        MAVEN_HOME = tool 'M3' // Make sure this matches the name in Global Tool Config
+        MAVEN_CMD = "${MAVEN_HOME}/bin/mvn"
+        SONAR_TOKEN = credentials('sonarqube-token') // Stored in Jenkins Credentials
+        SETTINGS_FILE = "/var/lib/jenkins/settings.xml" // Your custom settings.xml path
     }
 
     stages {
-        // Stage 1: Clone Code from GitHub
+        // Stage 1: Clone from GitHub
         stage('Clone Repository') {
             steps {
-                git branch: 'main',
-                     url: 'https://github.com/sunrisers-heroic/maven-web-app.git', 
-                     credentialsId: 'github-credentials'
+                echo "Cloning GitHub repository..."
+                git branch: 'main', // Change if using 'master' or another branch
+                     url: 'https://github.com/sunrisers-heroic/maven-web-app.git' 
             }
         }
 
-        // Stage 2: Build WAR with Maven
-        stage('Build WAR with Maven') {
+        // Stage 2: Build with Maven
+        stage('Build with Maven') {
             steps {
-                script {
-                    def mavenHome = tool name: "M3", type: "maven"
-                    sh "${mavenHome}/bin/mvn clean package"
+                echo "Building project with Maven..."
+                sh "${MAVEN_CMD} -s ${SETTINGS_FILE} clean package"
+            }
+        }
+
+        // Stage 3: Run SonarQube Analysis
+        stage('SonarQube Analysis') {
+            steps {
+                echo "Running SonarQube analysis..."
+                withSonarQubeEnv('SonarQube') { // 'SonarQube' is the server name configured in Jenkins
+                    sh "${MAVEN_CMD} -s ${SETTINGS_FILE} sonar:sonar -Dsonar.login=${SONAR_TOKEN}"
                 }
             }
         }
 
-        // Stage 3: Upload WAR to Nexus Snapshots
-        stage('Upload WAR to Nexus Snapshots') {
+        // Stage 4: Deploy to Nexus
+        stage('Deploy to Nexus') {
             steps {
-                nexusArtifactUploader(
-                    artifacts: [
-                        [artifactId: '01-maven-web-app', file: 'target/01-maven-web-app.war', type: 'war']
-                    ],
-                    credentialsId: 'nexus-maven-hub',
-                    groupId: 'com.app.raghu',
-                    nexusUrl: '44.211.221.99:8081',
-                    protocol: 'http',
-                    repository: 'maven-snapshots',
-                    version: "${VERSION}"
-                )
+                echo "Deploying artifact to Nexus..."
+                sh "${MAVEN_CMD} -s ${SETTINGS_FILE} deploy"
             }
         }
     }
 
+    // Optional: Post-build actions
     post {
         success {
-            echo "✅ SUCCESS: WAR uploaded to Nexus Snapshots!"
+            echo "✅ Pipeline succeeded!"
         }
         failure {
-            echo "❌ FAILURE: Something went wrong during build or upload."
+            echo "❌ Pipeline failed!"
         }
     }
 }
