@@ -4,15 +4,12 @@ pipeline {
     environment {
         // Use full path to mvn
         MAVEN_CMD = "/opt/maven/bin/mvn"
-        MAVEN_SETTINGS = "maven.settings.xml" // Name of settings.xml uploaded in Jenkins UI
+        MAVEN_SETTINGS = "maven.settings.xml" // From Jenkins UI settings.xml
 
         // Credentials
         SONAR_TOKEN = credentials('sonarqube-token')
         GITHUB_CRED = credentials('github-credentials')
-        DOCKER_CRED = credentials('docker-hub-credentials')  // Add this in Jenkins Credentials
-
-        // GitHub repo URL
-        GITHUB_REPO = "https://github.com/sunrisers-heroic/maven-web-app.git" 
+        DOCKER_CRED = credentials('docker-hub-credentials')  // Add this in Jenkins
 
         // Docker image details
         DOCKER_IMAGE_NAME = "maven-web-app"
@@ -77,7 +74,7 @@ pipeline {
                 echo "Building and pushing Docker image..."
 
                 script {
-                    // Get version from pom.xml
+                    // Read version from pom.xml
                     def pom = readMavenPom file: 'maven-web-app/pom.xml'
                     env.BUILD_VERSION = pom.version
                     echo "Detected Version: ${env.BUILD_VERSION}"
@@ -85,15 +82,17 @@ pipeline {
 
                 sh """
                     cd maven-web-app
-                    docker build -t sunrisersheroic/maven-web-app:${BUILD_VERSION} .
-                    docker tag sunrisersheroic/maven-web-app:${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
+                    docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
+                    docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
                 """
 
                 sh """
-                    docker login -u ${DOCKER_CRED_USR} -p ${DOCKER_CRED_PSW}
-                    docker push sunrisersheroic/maven-web-app:${BUILD_VERSION}
+                    docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
+                    docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
                     docker push sunrisersheroic/maven-web-app:latest
                 """
+
+                echo "✅ Docker image pushed to Docker Hub!"
             }
         }
     }
