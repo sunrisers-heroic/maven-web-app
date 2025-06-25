@@ -2,12 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Name of the settings.xml file you uploaded in Jenkins UI
-        MAVEN_SETTINGS = "settings.xml"
+        // Use full path to mvn
+        MAVEN_CMD = "/opt/maven/bin/mvn"
+        MAVEN_SETTINGS = "maven.settings.xml" // Name of settings.xml uploaded in Jenkins UI
 
-        // Credentials from Jenkins Credentials Store
-        SONAR_TOKEN = credentials('sonarqube-token') // Secret text credential ID
-        GITHUB_CRED = credentials('github-credentials') // GitHub username/password credential ID
+        // Credentials
+        SONAR_TOKEN = credentials('sonarqube-token')
+        GITHUB_CRED = credentials('github-credentials')
 
         // GitHub repo URL
         GITHUB_REPO = "https://github.com/sunrisers-heroic/maven-web-app.git" 
@@ -30,24 +31,26 @@ pipeline {
         // Stage 2: Build with Maven
         stage('Build with Maven') {
             steps {
-                echo "Building project with Maven using custom settings..."
+                echo "Building project with Maven..."
                 sh """
                     cd maven-web-app
-                    mvn -s \${MAVEN_SETTINGS} clean package
+                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} clean package
                 """
+                echo "✅ Build completed!"
             }
         }
 
-        // Stage 3: Run SonarQube Analysis
+        // Stage 3: SonarQube Analysis
         stage('SonarQube Analysis') {
             steps {
                 echo "Running SonarQube analysis..."
-                withSonarQubeEnv('SonarQube') { // Ensure this matches your Sonar server name
+                withSonarQubeEnv('SonarQube') {
                     sh """
                         cd maven-web-app
-                        mvn -s \${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
+                        ${MAVEN_CMD} -s \${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
                     """
                 }
+                echo "✅ Code analysis completed!"
             }
         }
 
@@ -57,8 +60,9 @@ pipeline {
                 echo "Deploying artifact to Nexus..."
                 sh """
                     cd maven-web-app
-                    mvn -s \${MAVEN_SETTINGS} deploy
+                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} deploy
                 """
+                echo "✅ Artifact deployed to Nexus!"
             }
         }
     }
