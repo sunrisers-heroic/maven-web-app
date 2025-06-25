@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mavenwebapp
+  name: maven-web-app
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: mavenwebapp
+      app: maven-web-app
   template:
     metadata:
       labels:
-        app: mavenwebapp
+        app: maven-web-app
     spec:
       containers:
-        - name: mavenwebapp
-          image: maven-web-app:latest
-          ports:
-            - containerPort: 8080
+      - name: maven-web-app
+        image: sunrisersheroic/maven-web-app:latest
+        ports:
+        - containerPort: 8080
