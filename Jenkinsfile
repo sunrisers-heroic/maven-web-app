@@ -9,7 +9,7 @@ pipeline {
         // Credentials
         SONAR_TOKEN = credentials('sonarqube-token')
         GITHUB_CRED = credentials('github-credentials')
-        DOCKER_CRED = credentials('docker-hub-credentials')  // Add this in Jenkins
+        DOCKER_CRED = credentials('docker-hub-credentials')  // Add this in Jenkins Credentials
 
         // Docker image details
         DOCKER_IMAGE_NAME = "maven-web-app"
@@ -67,19 +67,19 @@ pipeline {
                 echo "✅ Artifact deployed to Nexus!"
             }
         }
+    }
 
-        // Stage 5: Build and Push Docker Image
-        stage('Build and Push Docker Image') {
-            steps {
-                echo "Building and pushing Docker image..."
+    post {
+        success {
+            echo "✅ Pipeline succeeded — starting Docker image build..."
 
-                script {
-                    // Read version from pom.xml
-                    def pom = readMavenPom file: 'maven-web-app/pom.xml'
-                    env.BUILD_VERSION = pom.version
-                    echo "Detected Version: ${env.BUILD_VERSION}"
-                }
+            script {
+                // Read version from pom.xml
+                def pom = readMavenPom file: 'maven-web-app/pom.xml'
+                env.BUILD_VERSION = pom.version
+                echo "Detected Version: ${env.BUILD_VERSION}"
 
+                // Build and push Docker image
                 sh """
                     cd maven-web-app
                     docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
@@ -95,14 +95,9 @@ pipeline {
                 echo "✅ Docker image pushed to Docker Hub!"
             }
         }
-    }
 
-    post {
-        success {
-            echo "✅ Pipeline succeeded!"
-        }
         failure {
-            echo "❌ Pipeline failed! Check logs for details."
+            echo "❌ Pipeline failed! Docker image was not built."
         }
     }
 }
