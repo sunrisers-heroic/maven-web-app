@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 http://maven.apache.org/xsd/settings-1.2.0.xsd"
+          xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <!-- Servers: Nexus Credentials -->
+  <servers>
+    <!-- Nexus Releases Repository -->
+    <server>
+      <id>nexus-releases</id>
+      <username>admin</username>
+      <password>nexus123</password>
+    </server>
+
+    <!-- Nexus Snapshots Repository -->
+    <server>
+      <id>nexus-snapshots</id>
+      <username>admin</username>
+      <password>nexus123</password>
+    </server>
+
+    <!-- Optional: SonarQube Token -->
+    <!-- Use this if you're referencing it as a server ID in pom.xml -->
+    <server>
+      <id>SonarQube</id>
+      <username>squ_dbe8c4f86fed6565e82cbf747e8f65660cc77adb</username>
+    </server>
+  </servers>
+
+  <!-- Optional: Mirrors -->
+  <mirrors>
+    <!-- Uncomment this to redirect all Maven requests through your Nexus -->
+    <!--
+    <mirror>
+      <id>nexus</id>
+      <url>http://3.95.151.6:8081/repository/maven-central/</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+    -->
+  </mirrors>
+
+  <!-- Profiles (Optional) -->
+  <profiles>
+    <profile>
+      <repositories>
+        <repository>
+          <id>central</id>
+          <url>https://repo.maven.apache.org/maven2</url> 
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</snapshots></snapshots>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+
+  <!-- Active Profile -->
+  <activeProfiles>
+    <activeProfile>default</activeProfile>
+  </activeProfiles>
+</settings>
