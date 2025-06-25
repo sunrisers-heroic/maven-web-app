@@ -4,9 +4,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!-- Project Info -->
-    <groupId>com.app.raghu</groupId>
+    <groupId>Niranjan</groupId>
     <artifactId>01-maven-web-app</artifactId>
-    <version>1.0.7</version>
+    <version>1.0.8</version>
           <packaging>war</packaging>
 
     <name>01-maven-web-app</name>
