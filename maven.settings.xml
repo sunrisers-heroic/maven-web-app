@@ -40,19 +40,22 @@
   </mirrors>
 
   <!-- Profiles (Optional) -->
-  <profiles>
+ <profiles>
     <profile>
       <repositories>
         <repository>
           <id>central</id>
           <url>https://repo.maven.apache.org/maven2</url> 
-          <releases><enabled>true</enabled></releases>
-          <snapshots><enabled>true</snapshots></snapshots>
+          <releases>
+            <enabled>true</enabled>
+          </releases>
+          <snapshots>
+            <enabled>false</enabled> <!-- Fixed closing tag -->
+          </snapshots>
         </repository>
       </repositories>
     </profile>
   </profiles>
-
   <!-- Active Profile -->
   <activeProfiles>
     <activeProfile>default</activeProfile>
