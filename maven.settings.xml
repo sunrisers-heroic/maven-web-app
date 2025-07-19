@@ -33,7 +33,7 @@
     <!--
     <mirror>
       <id>nexus</id>
-      <url>http://34.228.172.106:8081/repository/maven-central/</url>
+      <url>http://34.73.123.176:8081/repository/maven-central/</url>
       <mirrorOf>*</mirrorOf>
     </mirror>
     -->
