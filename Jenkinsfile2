@@ -1,50 +1,174 @@
+// Jenkinsfile (Declarative Pipeline) - Complete CI/CD for Remote K8s
+
 pipeline {
-    agent any
+    agent any // This means the pipeline will run on any available Jenkins agent (your Jenkins VM)
+
+    environment {
+        // --- GLOBAL CONFIGURATION (Replace placeholders) ---
+        DOCKERHUB_USERNAME = 'your-dockerhub-username' // <<<<< REPLACE WITH YOUR DOCKER HUB USERNAME
+        K8S_NAMESPACE = 'default'                      // <<<<< REPLACE if your Kubernetes namespace is different
+
+        // --- APPLICATION DETAILS (Usually consistent) ---
+        APP_NAME = 'maven-web-app'
+        CONTAINER_PORT = '8090' // The port your application runs on inside the container
+
+        // --- DYNAMIC VARIABLES (Automatically set by Jenkins/pipeline) ---
+        // Your Docker Hub repository name
+        APP_REPO_NAME = "${DOCKERHUB_USERNAME}/${APP_NAME}"
+        // Docker image tag will be dynamic (Jenkins BUILD_NUMBER)
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+        // Full Docker image name for pushing and deploying
+        FULL_IMAGE_NAME = "${APP_REPO_NAME}:${IMAGE_TAG}"
+
+        // Variables for the K8s manifest (aligned with your provided snippet)
+        // These are effectively aliases for clarity within the K8s YAML
+        DOCKER_IMAGE_NAME_FOR_K8S = "${APP_REPO_NAME}" // e.g., my-dockerhub-user/maven-web-app
+        BUILD_VERSION_FOR_K8S = "${IMAGE_TAG}"         // e.g., build-123
+    }
+
+    // Define credentials to be used in the pipeline
+    credentials {
+        // Credential for Docker Hub login (Type: "Username with password", ID: 'dockerhub-credentials-id')
+        usernamePassword(credentialsId: 'dockerhub-credentials-id', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')
+        // Credential for Kubernetes kubeconfig (Type: "Secret file", ID: 'kubeconfig')
+        file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')
+    }
 
     stages {
-        stage('Clone Repo (Optional)') {
+        stage('Checkout Source Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/yourname/yourrepo.git' 
+                echo "--- Checking out Git repository ---"
+                // Assumes your Jenkins job is configured to use SCM (Git) and checkout
+                // If your Maven app is in a sub-directory, you'll need 'dir("your-app-subdir") {'
+                script {
+                    git branch: 'main', credentialsId: 'your-git-credentials-id', url: 'https://github.com/your-username/your-repo.git'
+                    // ^^^ IMPORTANT: Replace branch, credentialsId (if private), and URL
+                }
+                echo "Source code checked out."
             }
         }
 
-        stage('Deploy to Docker Server') {
+        stage('Clean & Build Maven Project') {
             steps {
-                sshagent(['docker-server-ssh']) { // Use the ID you set for the SSH credential
-                    sh '''
-                        echo "Connecting to Docker server at 52.23.196.95..."
+                echo "--- Building Maven project ---"
+                script {
+                    // Assumes your pom.xml is in the root of the repo
+                    sh "mvn clean package"
+                }
+                echo "Maven build complete."
+            }
+        }
 
-                        # Run commands on the Docker server
-                        ssh -o StrictHostKeyChecking=no ec2-user@52.23.196.95 << 'EOF'
+        stage('Build Docker Image') {
+            steps {
+                echo "--- Building Docker image: ${FULL_IMAGE_NAME} ---"
+                script {
+                    // Build the Docker image.
+                    // Assumes your Dockerfile is in the root of the repo.
+                    sh "docker build -t ${FULL_IMAGE_NAME} ."
+                }
+                echo "Docker image built successfully."
+            }
+        }
 
-                            echo "Stopping and removing existing container..."
-                            docker stop maven-web-app || true
-                            docker rm maven-web-app || true
+        stage('Push Docker Image to Docker Hub') {
+            steps {
+                echo "--- Pushing Docker image to Docker Hub: ${FULL_IMAGE_NAME} ---"
+                script {
+                    // Log in to Docker Hub using Jenkins credentials
+                    sh "echo \"${DOCKER_PASSWORD}\" | docker login -u \"${DOCKER_USERNAME}\" --password-stdin"
+                    sh "docker push ${FULL_IMAGE_NAME}"
+                    sh "docker logout" // Good practice to log out
+                }
+                echo "Docker image pushed to Docker Hub."
+            }
+        }
 
-                            echo "Pulling latest Docker image..."
-                            docker pull sunrisersheroic/maven-web-app:latest
+        stage('Deploy to Kubernetes') {
+            steps {
+                echo "--- Deploying to Kubernetes using kubectl ---"
+                // Use withCredentials to expose the kubeconfig file securely
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_PATH')]) {
+                    script {
+                        // Ensure KUBECONFIG environment variable is set for kubectl
+                        sh """
+                            export KUBECONFIG=${KUBECONFIG_PATH}
+                            echo "Using kubeconfig from: ${KUBECONFIG_PATH}"
+                            kubectl config view # Optional: to see active context
 
-                            echo "Starting new container..."
-                            docker run -d \
-                                --name maven-web-app \
-                                -p 8090:8080 \
-                                sunrisersheroic/maven-web-app:latest
+                            # Create or update Deployment using inline YAML
+                            cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}-deployment
+  namespace: ${K8S_NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+    spec:
+      containers:
+      - name: ${APP_NAME}
+        image: ${DOCKER_IMAGE_NAME_FOR_K8S}:${BUILD_VERSION_FOR_K8S}
+        ports:
+        - containerPort: ${CONTAINER_PORT}
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+EOF
+                            echo "✅ Deployment applied to namespace: ${K8S_NAMESPACE}"
 
-                            echo "Container is running on port 8090"
-                            docker ps
-                        EOF
-                    '''
+                            # Create or update Service using inline YAML
+                            cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APP_NAME}-service
+  namespace: ${K8S_NAMESPACE}
+spec:
+  type: LoadBalancer # Or NodePort if you prefer that type, ensure port is configured
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - protocol: TCP
+      port: 80 # External service port
+      targetPort: ${CONTAINER_PORT} # Internal container port (8090)
+EOF
+                            echo "✅ Service applied to namespace: ${K8S_NAMESPACE}"
+
+                            echo "Checking rollout status..."
+                            kubectl rollout status deployment/${APP_NAME}-deployment -n ${K8S_NAMESPACE}
+
+                            echo "Deployment and Service applied to namespace: ${K8S_NAMESPACE}"
+                            echo "Please verify external IP of LoadBalancer service: kubectl get svc ${APP_NAME}-service -n ${K8S_NAMESPACE}"
+                        """
+                    }
                 }
             }
         }
     }
 
     post {
+        always {
+            echo "Pipeline finished."
+            // Optional: Cleanup old Docker images on the Jenkins VM to save space
+            sh "docker system prune -f"
+        }
         success {
-            echo '✅ Deployment successful!'
+            echo "🚀 Application deployed to remote Kubernetes cluster successfully!"
         }
         failure {
-            echo '❌ Deployment failed! Check logs for details.'
+            echo "❌ Deployment failed. Check Jenkins console for errors."
         }
     }
 }
