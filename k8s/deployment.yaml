@@ -2,8 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: maven-web-app
+  labels:
+    app: maven-web-app
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: maven-web-app
@@ -14,6 +16,13 @@ spec:
     spec:
       containers:
       - name: maven-web-app
-        image: sunrisersheroic/maven-web-app:latest
+        image: sunrisersheroic/maven-web-app:1.0.13
         ports:
-        - containerPort: 8080
+        - containerPort: 8090
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
