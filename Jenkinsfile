@@ -6,18 +6,14 @@ pipeline {
         MAVEN_CMD = "/opt/maven/bin/mvn"
         MAVEN_SETTINGS = "maven.settings.xml"
 
-        // Credentials IDs - Ensure these are configured in Jenkins
+        // Credentials
         SONAR_TOKEN = credentials('sonarqube-token')
-        GITHUB_CRED = credentials('github-credentials') // Assumes GITHUB_CRED_USR, GITHUB_CRED_PSW are exposed
-        // DOCKER_CRED is handled via withCredentials in the post block
+        GITHUB_CRED = credentials('github-credentials')
+        DOCKER_CRED = credentials('docker-hub-credentials')
 
-        // Project and Docker image info
+        // Project info
         DOCKER_IMAGE_NAME = "maven-web-app"
-        DOCKER_REGISTRY_REPO = "sunrisersheroic" // Your Docker Hub username or organization
-        DOCKER_FULL_IMAGE_NAME = "${DOCKER_REGISTRY_REPO}/${DOCKER_IMAGE_NAME}"
-
-        APP_CONTAINER_PORT = 8080 // <<< IMPORTANT: Confirm this is the port your Maven web app listens on
-        K8S_SERVICE_NODEPORT = 30080 // <<< IMPORTANT: NodePort for external access (choose 30000-32767)
+        DOCKER_REGISTRY = "sunrisersheroic/\${DOCKER_IMAGE_NAME}"
     }
 
     stages {
@@ -40,7 +36,7 @@ pipeline {
                 echo "Building project with Maven..."
                 sh """
                     cd maven-web-app
-                    ${MAVEN_CMD} -s ${MAVEN_SETTINGS} clean package
+                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} clean package
                 """
                 echo "✅ Build completed!"
             }
@@ -53,7 +49,7 @@ pipeline {
                 withSonarQubeEnv('SonarQube') {
                     sh """
                         cd maven-web-app
-                        ${MAVEN_CMD} -s ${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
+                        ${MAVEN_CMD} -s \${MAVEN_SETTINGS} sonar:sonar -Dsonar.login=${SONAR_TOKEN}
                     """
                 }
                 echo "✅ Code analysis completed!"
@@ -66,7 +62,7 @@ pipeline {
                 echo "Deploying artifact to Nexus..."
                 sh """
                     cd maven-web-app
-                    ${MAVEN_CMD} -s ${MAVEN_SETTINGS} deploy || echo "⚠️ Skipping Nexus deploy for now"
+                    ${MAVEN_CMD} -s \${MAVEN_SETTINGS} deploy || echo "⚠️ Skipping Nexus deploy for now"
                 """
                 echo "✅ Artifact deployment attempted."
             }
@@ -75,38 +71,58 @@ pipeline {
 
     post {
         success {
-            echo "✅ Pipeline succeeded — starting Docker image build and Kubernetes deployment..."
+            echo "✅ Pipeline succeeded — starting Docker image build..."
 
             script {
                 // Manually extract version from pom.xml using shell
                 def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
                 env.BUILD_VERSION = pomVersion ?: "latest"
-                echo "Detected Application Version: ${BUILD_VERSION}"
+                echo "Detected Version: \${BUILD_VERSION}"
             }
 
             // Build Docker image using local WAR file
             sh """
                 cd maven-web-app
-                docker build -t ${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION} .
-                docker tag ${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION} ${DOCKER_FULL_IMAGE_NAME}:latest
+                docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} .
+                docker tag sunrisersheroic/maven-web-app:\${BUILD_VERSION} sunrisersheroic/maven-web-app:latest
             """
 
-            // Push to Docker Hub securely
-            withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USR', passwordVariable: 'DOCKER_PSW')]) {
-                sh """
-                    docker login -u ${DOCKER_USR} -p ${DOCKER_PSW}
-                    docker push ${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION}
-                    docker push ${DOCKER_FULL_IMAGE_NAME}:latest
-                """
-            }
+            // Push to Docker Hub
+            sh """
+                docker login -u \${DOCKER_CRED_USR} -p \${DOCKER_CRED_PSW}
+                docker push sunrisersheroic/maven-web-app:\${BUILD_VERSION}
+                docker push sunrisersheroic/maven-web-app:latest
+            """
+
             echo "✅ Docker image pushed to Docker Hub!"
 
-            // --- Kubernetes Deployment starts here ---
-            echo "Deploying ${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION} to Kubernetes..."
+            // -------------------------------
+            // ✅ ADDING KUBERNETES DEPLOYMENT IN POST BLOCK
+            // -------------------------------
+            script {
+                echo "Verifying Kubernetes cluster connection..."
 
-            // Define and apply the Kubernetes Deployment
-            sh '''
-                cat <<EOF | kubectl apply -f -
+                // Inject kubeconfig from Jenkins credentials
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBE_CONFIG')]) {
+                    sh '''
+                        # Write kubeconfig
+                        mkdir -p ~/.kube
+                        echo "$KUBE_CONFIG" > ~/.kube/config
+                        chmod 600 ~/.kube/config
+                    '''
+                }
+
+                // Verify Kubernetes connection
+                sh 'kubectl get nodes'
+                sh 'kubectl get deployments --all-namespaces'
+                sh 'kubectl cluster-info'
+                sh 'echo "Kubernetes connection successful!"'
+
+                echo "Creating Kubernetes Deployment and Service for sunrisersheroic/maven-web-app..."
+
+                // Apply Deployment
+                sh '''
+                    cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -125,15 +141,15 @@ spec:
     spec:
       containers:
       - name: sunrisers-heroic-webapp-container
-        image: ''' + "${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION}" + ''' # Use the built and pushed image
+        image: sunrisersheroic/maven-web-app:latest
         ports:
-        - containerPort: ''' + "${APP_CONTAINER_PORT}" + ''' # Internal port of your app
+        - containerPort: 8080
 EOF
-            '''
+                '''
 
-            // Define and apply the Kubernetes Service
-            sh '''
-                cat <<EOF | kubectl apply -f -
+                // Apply Service
+                sh '''
+                    cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Service
 metadata:
@@ -141,41 +157,39 @@ metadata:
 spec:
   selector:
     app: sunrisers-heroic-webapp
-  type: NodePort # Expose via NodePort on all Kubernetes nodes
+  type: NodePort
   ports:
     - protocol: TCP
-      port: 80 # Service port (internal cluster access)
-      targetPort: ''' + "${APP_CONTAINER_PORT}" + ''' # Must match containerPort
-      nodePort: ''' + "${K8S_SERVICE_NODEPORT}" + ''' # External port on K8s nodes (30000-32767)
+      port: 80
+      targetPort: 8080
+      nodePort: 30080
 EOF
-            '''
-            echo "Kubernetes Deployment and Service applied. Checking status..."
-            sh 'kubectl get deployment sunrisers-heroic-webapp-deployment'
-            sh 'kubectl get service sunrisers-heroic-webapp-service'
-            sh 'kubectl get pods -l app=sunrisers-heroic-webapp --watch & sleep 10 && kill $!' # Watch pods briefly
-            echo "✅ Application deployment initiated on Kubernetes worker nodes!"
-            // --- Kubernetes Deployment ends here ---
+                '''
 
-        } // End of post.success block
-
-        failure {
-            echo "❌ Pipeline failed! Review the console output for errors in any stage."
-
-            // Attempt fallback Docker build for debugging
-            script {
-                // Try to get version even after failure
-                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true, allowEmptyStdout: true).trim()
-                env.BUILD_VERSION = pomVersion ?: "latest"
-                echo "Attempting fallback Docker build for version: ${BUILD_VERSION}"
+                echo "Deployment and Service applied. Checking status..."
+                sh 'kubectl get deployment sunrisers-heroic-webapp-deployment'
+                sh 'kubectl get service sunrisers-heroic-webapp-service'
+                sh 'echo "✅ Your application should now be deploying on the worker nodes!"'
             }
-            sh """
-                cd maven-web-app
-                docker build -t ${DOCKER_FULL_IMAGE_NAME}:${BUILD_VERSION} . || echo "Fallback Docker image build failed."
-            """
         }
 
-        always {
-            echo "Pipeline finished."
+        failure {
+            echo "❌ Pipeline failed but attempting fallback Docker build..."
+
+            script {
+                // Try to get version even after failure
+                def pomVersion = sh(script: 'cd maven-web-app && grep -m1 "<version>.*</version>" pom.xml | sed -E "s/.*<version>(.*)<\\/version>.*/\\1/"', returnStdout: true).trim()
+                env.BUILD_VERSION = pomVersion ?: "latest"
+                echo "Using version: \${BUILD_VERSION}"
+            }
+
+            // Attempt fallback Docker build
+            sh """
+                cd maven-web-app
+                docker build -t sunrisersheroic/maven-web-app:\${BUILD_VERSION} . || echo "Failed to build Docker image"
+            """
+
+            echo "⚠️ If Docker build failed, check logs above"
         }
     }
 }
