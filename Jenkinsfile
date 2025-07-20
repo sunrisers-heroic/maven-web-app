@@ -186,7 +186,7 @@ spec:
 EOF
             '''
             echo "Deployment and Service applied. Waiting for deployment rollout to complete..."
-            # Wait for the deployment to be stable before marking the stage as complete
+            // Wait for the deployment to be stable before marking the stage as complete
             sh 'kubectl rollout status deployment/sunrisers-heroic-webapp-deployment --timeout=5m'
             echo "✅ Application deployment initiated on Kubernetes cluster!"
             // --- Kubernetes Deployment ends here ---
