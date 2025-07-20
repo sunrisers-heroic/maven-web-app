@@ -16,7 +16,7 @@ pipeline {
         DOCKER_REGISTRY = "sunrisersheroic/${DOCKER_IMAGE_NAME}" // Corrected string interpolation for Groovy
 
         // Kubernetes Deployment specific info
-        APP_CONTAINER_PORT = 8090 // <<< IMPORTANT: Confirm this is the port your Maven web app listens on
+        APP_CONTAINER_PORT = 8080 // <<< IMPORTANT: Confirm this is the port your Maven web app listens on
         K8S_SERVICE_NODEPORT = 30090 // <<< IMPORTANT: NodePort for external access (choose 30000-32767)
     }
 
