@@ -1,0 +1,127 @@
+#!/bin/bash
+
+# --- Simple Nexus Repository Manager Installation Script for Debian ---
+
+echo "--- Starting Nexus Repository Manager Installation ---"
+echo "This script will install Java and Nexus."
+echo "It assumes a fresh Debian-based system."
+echo ""
+
+# --- Step 1: Update System Packages ---
+echo "--- Step 1: Updating System Packages ---"
+echo "This ensures your system has the latest package information."
+sudo apt update -y
+echo "System packages updated."
+echo ""
+
+# --- Step 2: Install Java (OpenJDK 17) ---
+echo "--- Step 2: Installing Java (OpenJDK 17) ---"
+echo "Java is required for Nexus."
+sudo apt install fontconfig openjdk-17-jre -y
+echo "Java installed. Verifying version:"
+java -version
+echo "Java installation complete."
+echo ""
+
+# --- Step 3: Download and Extract Nexus ---
+echo "--- Step 3: Downloading and Extracting Nexus ---"
+echo "Nexus is a repository manager for artifacts."
+
+NEXUS_VERSION="3.82.0-08" # Using the latest version you provided
+NEXUS_TAR_GZ="nexus-${NEXUS_VERSION}-linux-x86_64.tar.gz"
+NEXUS_DOWNLOAD_URL="https://download.sonatype.com/nexus/3/${NEXUS_TAR_GZ}"
+NEXUS_EXTRACTED_DIR="/opt/nexus-${NEXUS_VERSION}"
+NEXUS_HOME_SYMLINK="/opt/nexus"
+INSTALL_DIR="/opt"
+SONATYPE_WORK_DIR="/opt/sonatype-work"
+
+echo "Downloading Nexus ${NEXUS_VERSION}..."
+sudo wget "${NEXUS_DOWNLOAD_URL}" -P /tmp
+
+echo "Extracting Nexus to /opt/..."
+sudo tar xvzf "/tmp/${NEXUS_TAR_GZ}" -C "${INSTALL_DIR}"
+
+echo "Creating a simple link for Nexus at /opt/nexus..."
+sudo mv "${NEXUS_EXTRACTED_DIR}" "${NEXUS_HOME_SYMLINK}"
+echo "Nexus extraction and linking complete."
+echo ""
+
+# --- Step 4: Create Nexus User and Set Permissions ---
+echo "--- Step 4: Creating Nexus User and Setting Permissions ---"
+echo "Nexus should run as a dedicated, non-root user for security."
+
+NEXUS_USER="nexus"
+NEXUS_GROUP="nexus"
+
+echo "Creating a system user for Nexus: '${NEXUS_USER}'..."
+sudo adduser --system --no-create-home --group "${NEXUS_USER}"
+
+echo "Creating Nexus work directory: '${SONATYPE_WORK_DIR}'..."
+sudo mkdir -p "${SONATYPE_WORK_DIR}"
+
+echo "Setting ownership and permissions for Nexus directories..."
+sudo chown -R "${NEXUS_USER}":"${NEXUS_GROUP}" "${NEXUS_HOME_SYMLINK}"
+sudo chown -R "${NEXUS_USER}":"${NEXUS_GROUP}" "${SONATYPE_WORK_DIR}"
+sudo chmod -R 775 "${NEXUS_HOME_SYMLINK}"
+sudo chmod -R 775 "${SONATYPE_WORK_DIR}"
+echo "User creation and permissions setup complete."
+echo ""
+
+# --- Step 5: Configure Nexus to Run as Dedicated User ---
+echo "--- Step 5: Configuring Nexus to Run as Dedicated User ---"
+echo "This tells Nexus to start using the 'nexus' user."
+
+echo "run_as_user=\"${NEXUS_USER}\"" | sudo tee "${NEXUS_HOME_SYMLINK}/bin/nexus.rc" > /dev/null
+echo "Nexus user configuration complete."
+echo ""
+
+# --- Step 6: Create Systemd Service for Nexus ---
+echo "--- Step 6: Creating Systemd Service for Nexus ---"
+echo "This allows you to manage Nexus like any other system service."
+
+sudo tee /etc/systemd/system/nexus.service > /dev/null <<EOF
+[Unit]
+Description=Nexus Repository Manager Service
+After=network.target
+
+[Service]
+Type=forking
+LimitNOFILE=65536
+User=${NEXUS_USER}
+Group=${NEXUS_GROUP}
+ExecStart=${NEXUS_HOME_SYMLINK}/bin/nexus start
+ExecStop=${NEXUS_HOME_SYMLINK}/bin/nexus stop
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+echo "Systemd service file created."
+echo ""
+
+# --- Step 7: Start and Enable Nexus Service ---
+echo "--- Step 7: Starting and Enabling Nexus Service ---"
+echo "Nexus will now start and be configured to launch on system boot."
+
+echo "Reloading systemd daemon to recognize the new service..."
+sudo systemctl daemon-reload
+
+echo "Enabling Nexus service..."
+sudo systemctl enable nexus
+
+echo "Starting Nexus service..."
+sudo systemctl start nexus
+
+echo "Checking Nexus service status (it might take a moment to fully start):"
+sudo systemctl status nexus
+echo "Nexus service management complete."
+echo ""
+
+echo "--- Nexus Installation Finished! ---"
+echo "Next Steps:"
+echo "1. Access Nexus: Open your server's public IP on port 8081 in a web browser (e.g., http://YOUR_SERVER_IP:8081/)."
+echo "2. Get Initial Admin Password: Run 'sudo cat ${SONATYPE_WORK_DIR}/nexus3/admin.password' on your server."
+echo "3. Complete Nexus Setup: Log in with 'admin' and the retrieved password, then follow the prompts."
+echo ""
+echo "Important Note: Ensure port 8081 is open in your firewall rules for external access."
+

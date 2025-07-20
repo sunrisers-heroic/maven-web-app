@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# --- Configuration Variables ---
+PROJECT_ID="graceful-castle-459606-e9"
+REGION="us-central1"
+ZONE="us-central1-a"
+
+# Network Configuration
+VPC_NETWORK_NAME="devops-vpc"
+SUBNET_NAME="devops-subnet"
+SUBNET_CIDR_RANGE="10.0.0.0/16"
+
+# Instance Configuration
+NEXUS_INSTANCE_NAME="nexus-server"
+SONAR_INSTANCE_NAME="sonarqube-server"
+MACHINE_TYPE="e2-medium"
+BOOT_DISK_SIZE="50GB" # Nexus/SonarQube benefit from larger disks
+IMAGE_FAMILY="debian-12"
+IMAGE_PROJECT="debian-cloud"
+
+# Static IP Names
+NEXUS_IP_NAME="nexus-static-ip"
+SONAR_IP_NAME="sonar-static-ip"
+
+echo "--- Starting GCP Nexus and SonarQube VPC Setup ---"
+echo "Project: $PROJECT_ID | Region: $REGION | Zone: $ZONE"
+
+# 1. Delete existing static IPs
+echo "--- Checking and Deleting Existing Static IPs ---"
+STATIC_IPS=("$NEXUS_IP_NAME" "$SONAR_IP_NAME")
+for IP_NAME in "${STATIC_IPS[@]}"; do
+  if gcloud compute addresses describe "$IP_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+    echo "Deleting static IP: $IP_NAME"
+    gcloud compute addresses delete "$IP_NAME" --region="$REGION" --project="$PROJECT_ID" --quiet
+  else
+    echo "Static IP $IP_NAME not found. Skipping..."
+  fi
+done
+
+# 2. Create VPC Network
+echo "--- Creating VPC Network: $VPC_NETWORK_NAME ---"
+if ! gcloud compute networks describe "$VPC_NETWORK_NAME" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks create "$VPC_NETWORK_NAME" \
+    --project="$PROJECT_ID" \
+    --subnet-mode=custom \
+    --description="VPC for Nexus and SonarQube"
+  echo "VPC Network '$VPC_NETWORK_NAME' created."
+else
+  echo "VPC Network '$VPC_NETWORK_NAME' already exists. Skipping creation."
+fi
+
+# 3. Create Subnet within the VPC
+echo "--- Creating Subnet: $SUBNET_NAME in $REGION ---"
+if ! gcloud compute networks subnets describe "$SUBNET_NAME" --network="$VPC_NETWORK_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks subnets create "$SUBNET_NAME" \
+    --project="$PROJECT_ID" \
+    --network="$VPC_NETWORK_NAME" \
+    --region="$REGION" \
+    --range="$SUBNET_CIDR_RANGE" \
+    --description="Subnet for Nexus and SonarQube instances"
+  echo "Subnet '$SUBNET_NAME' created."
+else
+  echo "Subnet '$SUBNET_NAME' already exists. Skipping creation."
+fi
+
+# 4. Create Firewall Rules
+echo "--- Creating Firewall Rules ---"
+# Allow SSH
+gcloud compute firewall-rules create "allow-ssh-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:22 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=ssh-access \
+  --description="Allow SSH access" --quiet || echo "SSH firewall rule exists/failed to create."
+
+# Allow Nexus port (8081)
+gcloud compute firewall-rules create "allow-nexus-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:8081 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=nexus-server \
+  --description="Allow Nexus access (port 8081)" --quiet || echo "Nexus firewall rule exists/failed to create."
+
+# Allow SonarQube port (9000)
+gcloud compute firewall-rules create "allow-sonarqube-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:9000 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=sonarqube-server \
+  --description="Allow SonarQube access (port 9000)" --quiet || echo "SonarQube firewall rule exists/failed to create."
+
+# Allow internal communication
+gcloud compute firewall-rules create "allow-internal-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp,udp,icmp \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --description="Allow all internal traffic within the VPC subnet" --quiet || echo "Internal firewall rule exists/failed to create."
+
+# 5. Create new Static External IP Addresses
+echo "--- Creating New Static External IP Addresses ---"
+gcloud compute addresses create "$NEXUS_IP_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --description="Static IP for Nexus" || echo "Nexus static IP exists/failed to create."
+gcloud compute addresses create "$SONAR_IP_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --description="Static IP for SonarQube" || echo "SonarQube static IP exists/failed to create."
+
+# 6. Create Instances and Assign Static IPs
+echo "--- Creating Instances and Assigning Static IPs ---"
+# Nexus Instance
+if ! gcloud compute instances describe "$NEXUS_INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Creating Nexus instance: $NEXUS_INSTANCE_NAME..."
+  gcloud compute instances create "$NEXUS_INSTANCE_NAME" \
+    --project="$PROJECT_ID" \
+    --zone="$ZONE" \
+    --machine-type="$MACHINE_TYPE" \
+    --subnet="$SUBNET_NAME" \
+    --image-family="$IMAGE_FAMILY" \
+    --image-project="$IMAGE_PROJECT" \
+    --boot-disk-size="$BOOT_DISK_SIZE" \
+    --address="$NEXUS_IP_NAME" \
+    --tags=ssh-access,nexus-server \
+    --description="VM for Nexus Repository Manager"
+else
+  echo "Instance '$NEXUS_INSTANCE_NAME' already exists. Skipping creation."
+fi
+
+# SonarQube Instance
+if ! gcloud compute instances describe "$SONAR_INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Creating SonarQube instance: $SONAR_INSTANCE_NAME..."
+  gcloud compute instances create "$SONAR_INSTANCE_NAME" \
+    --project="$PROJECT_ID" \
+    --zone="$ZONE" \
+    --machine-type="$MACHINE_TYPE" \
+    --subnet="$SUBNET_NAME" \
+    --image-family="$IMAGE_FAMILY" \
+    --image-project="$IMAGE_PROJECT" \
+    --boot-disk-size="$BOOT_DISK_SIZE" \
+    --address="$SONAR_IP_NAME" \
+    --tags=ssh-access,sonarqube-server \
+    --description="VM for SonarQube"
+else
+  echo "Instance '$SONAR_INSTANCE_NAME' already exists. Skipping creation."
+fi
+
+# 7. Output External IPs
+echo "--- External IP Addresses ---"
+NEXUS_EXTERNAL_IP=$(gcloud compute instances describe "$NEXUS_INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+SONAR_EXTERNAL_IP=$(gcloud compute instances describe "$SONAR_INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+echo "Nexus External IP: $NEXUS_EXTERNAL_IP"
+echo "SonarQube External IP: $SONAR_EXTERNAL_IP"
+
+echo "--- GCP Nexus and SonarQube VPC Setup Complete ---"
+

@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# --- Configuration Variables ---
+PROJECT_ID="graceful-castle-459606-e9"
+
+# VPC Network Names to Peer
+VPC_NETWORK_1_NAME="jenkins-main-vpc"
+VPC_NETWORK_2_NAME="k8s-master-vpc"
+
+# Peering Connection Names (must be unique within the project)
+PEERING_NAME_1_TO_2="peering-jenkins-main-to-k8s-master"
+PEERING_NAME_2_TO_1="peering-k8s-master-to-jenkins-main"
+
+echo "--- Starting GCP VPC Peering Setup ---"
+echo "Project: $PROJECT_ID"
+echo "Peering between '$VPC_NETWORK_1_NAME' and '$VPC_NETWORK_2_NAME'"
+
+# 1. Create Peering Connection from VPC 1 to VPC 2
+echo "--- Creating peering connection from '$VPC_NETWORK_1_NAME' to '$VPC_NETWORK_2_NAME' ---"
+gcloud compute networks peerings create "$PEERING_NAME_1_TO_2" \
+  --network="$VPC_NETWORK_1_NAME" \
+  --peer-project="$PROJECT_ID" \
+  --peer-network="$VPC_NETWORK_2_NAME" \
+  --import-custom-routes \
+  --export-custom-routes \
+  --project="$PROJECT_ID" || echo "Peering '$PEERING_NAME_1_TO_2' exists or failed to create."
+
+# 2. Create Peering Connection from VPC 2 to VPC 1
+echo "--- Creating peering connection from '$VPC_NETWORK_2_NAME' to '$VPC_NETWORK_1_NAME' ---"
+gcloud compute networks peerings create "$PEERING_NAME_2_TO_1" \
+  --network="$VPC_NETWORK_2_NAME" \
+  --peer-project="$PROJECT_ID" \
+  --peer-network="$VPC_NETWORK_1_NAME" \
+  --import-custom-routes \
+  --export-custom-routes \
+  --project="$PROJECT_ID" || echo "Peering '$PEERING_NAME_2_TO_1' exists or failed to create."
+
+echo "--- VPC Peering Setup Finished! ---"
+echo "It may take a few minutes for the peering connections to become active."
+echo "You can check their status in the GCP Console under VPC network -> VPC Network Peering."
+

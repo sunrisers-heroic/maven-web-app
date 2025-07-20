@@ -1,0 +1,202 @@
+#!/bin/bash
+
+# --- Configuration Variables ---
+PROJECT_ID="graceful-castle-459606-e9"
+REGION="us-central1"
+ZONE="us-central1-a"
+
+# Network Configuration (Single VPC and Subnet for the entire K8s cluster)
+VPC_NETWORK_NAME="k8s-cluster-vpc"
+SUBNET_NAME="k8s-cluster-subnet"
+SUBNET_CIDR_RANGE="10.3.0.0/20" # A larger subnet to accommodate multiple nodes and pods
+
+# Instance Configuration - Master Node
+K8S_MASTER_INSTANCE_NAME="k8s-master-node"
+MASTER_MACHINE_TYPE="e2-medium" # Recommended for K8s master
+MASTER_BOOT_DISK_SIZE="50GB"   # Recommended for K8s master
+
+# Instance Configuration - Worker Node
+K8S_WORKER_INSTANCE_NAME="k8s-worker-node-1" # Name for the first worker node
+WORKER_MACHINE_TYPE="e2-medium" # Recommended for K8s worker
+WORKER_BOOT_DISK_SIZE="50GB"   # Recommended for K8s worker
+
+IMAGE_FAMILY="debian-12"
+IMAGE_PROJECT="debian-cloud"
+
+# Static IP Names
+K8S_MASTER_IP_NAME="k8s-master-static-ip"
+K8S_WORKER_IP_NAME="k8s-worker-static-ip-1"
+
+echo "--- Starting GCP Kubernetes Cluster Setup (Single VPC) ---"
+echo "Project: $PROJECT_ID | Region: $REGION | Zone: $ZONE"
+
+# 1. Delete existing static IPs
+echo "--- Checking and Deleting Existing Static IPs ---"
+STATIC_IPS=("$K8S_MASTER_IP_NAME" "$K8S_WORKER_IP_NAME")
+for IP_NAME in "${STATIC_IPS[@]}"; do
+  if gcloud compute addresses describe "$IP_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+    echo "Deleting static IP: $IP_NAME"
+    gcloud compute addresses delete "$IP_NAME" --region="$REGION" --project="$PROJECT_ID" --quiet
+  else
+    echo "Static IP $IP_NAME not found. Skipping..."
+  fi
+done
+
+# 2. Create VPC Network
+echo "--- Creating VPC Network: $VPC_NETWORK_NAME ---"
+if ! gcloud compute networks describe "$VPC_NETWORK_NAME" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks create "$VPC_NETWORK_NAME" \
+    --project="$PROJECT_ID" \
+    --subnet-mode=custom \
+    --description="VPC for Kubernetes Cluster (Master and Workers)"
+  echo "VPC Network '$VPC_NETWORK_NAME' created."
+else
+  echo "VPC Network '$VPC_NETWORK_NAME' already exists. Skipping creation."
+fi
+
+# 3. Create Subnet within the VPC
+echo "--- Creating Subnet: $SUBNET_NAME in $REGION ---"
+if ! gcloud compute networks subnets describe "$SUBNET_NAME" --network="$VPC_NETWORK_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks subnets create "$SUBNET_NAME" \
+    --project="$PROJECT_ID" \
+    --network="$VPC_NETWORK_NAME" \
+    --region="$REGION" \
+    --range="$SUBNET_CIDR_RANGE" \
+    --description="Subnet for Kubernetes Master and Worker Nodes"
+  echo "Subnet '$SUBNET_NAME' created."
+else
+  echo "Subnet '$SUBNET_NAME' already exists. Skipping creation."
+fi
+
+# 4. Create Firewall Rules (for K8s Cluster)
+echo "--- Creating Firewall Rules for Kubernetes Cluster ---"
+# Allow SSH to all K8s nodes
+gcloud compute firewall-rules create "allow-ssh-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:22 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=ssh-access \
+  --description="Allow SSH access to K8s nodes" --quiet || echo "SSH firewall rule exists/failed to create."
+
+# Allow Kubernetes API Server (6443) to Master
+gcloud compute firewall-rules create "allow-k8s-api-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:6443 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=k8s-master-node \
+  --description="Allow K8s API Server access (6443)" --quiet || echo "K8s API firewall rule exists/failed to create."
+
+# Allow etcd (2379-2380) from within the cluster subnet to Master
+gcloud compute firewall-rules create "allow-etcd-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:2379-2380 \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --target-tags=k8s-master-node \
+  --description="Allow etcd access (2379-2380) from within subnet" --quiet || echo "etcd firewall rule exists/failed to create."
+
+# Allow Kubelet (10250), Kube-scheduler (10259), Kube-controller-manager (10257) from within the cluster subnet
+gcloud compute firewall-rules create "allow-k8s-internal-control-plane-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:10250,tcp:10257,tcp:10259 \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --target-tags=k8s-master-node,k8s-worker-node \
+  --description="Allow K8s internal control plane ports" --quiet || echo "K8s internal control plane firewall rule exists/failed to create."
+
+# Allow NodePort Services (30000-32767) to Worker Nodes
+gcloud compute firewall-rules create "allow-k8s-nodeport-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:30000-32767 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=k8s-worker-node \
+  --description="Allow K8s NodePort range" --quiet || echo "K8s NodePort firewall rule exists/failed to create."
+
+# Allow Flannel (UDP 8472) for pod networking between all nodes
+gcloud compute firewall-rules create "allow-flannel-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=udp:8472 \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --target-tags=k8s-master-node,k8s-worker-node \
+  --description="Allow Flannel (UDP 8472) for pod networking" --quiet || echo "Flannel firewall rule exists/failed to create."
+
+# Allow internal communication within the VPC subnet (catch-all for cluster internal traffic)
+gcloud compute firewall-rules create "allow-internal-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp,udp,icmp \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --description="Allow all internal traffic within the K8s VPC subnet" --quiet || echo "Internal firewall rule exists/failed to create."
+
+
+# 5. Create new Static External IP Addresses
+echo "--- Creating New Static External IP Addresses ---"
+gcloud compute addresses create "$K8S_MASTER_IP_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --description="Static IP for K8s Master Node" || echo "K8s Master static IP exists/failed to create."
+gcloud compute addresses create "$K8S_WORKER_IP_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --description="Static IP for K8s Worker Node 1" || echo "K8s Worker static IP exists/failed to create."
+
+
+# 6. Create Instances and Assign Static IPs
+echo "--- Creating Kubernetes Master and Worker Node Instances and Assigning Static IPs ---"
+# Master Instance
+if ! gcloud compute instances describe "$K8S_MASTER_INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Creating K8s Master instance: $K8S_MASTER_INSTANCE_NAME..."
+  gcloud compute instances create "$K8S_MASTER_INSTANCE_NAME" \
+    --project="$PROJECT_ID" \
+    --zone="$ZONE" \
+    --machine-type="$MASTER_MACHINE_TYPE" \
+    --subnet="$SUBNET_NAME" \
+    --image-family="$IMAGE_FAMILY" \
+    --image-project="$IMAGE_PROJECT" \
+    --boot-disk-size="$MASTER_BOOT_DISK_SIZE" \
+    --address="$K8S_MASTER_IP_NAME" \
+    --tags=ssh-access,k8s-master-node \
+    --description="VM for Kubernetes Master Node"
+else
+  echo "Instance '$K8S_MASTER_INSTANCE_NAME' already exists. Skipping creation."
+fi
+
+# Worker Instance
+if ! gcloud compute instances describe "$K8S_WORKER_INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Creating K8s Worker instance: $K8S_WORKER_INSTANCE_NAME..."
+  gcloud compute instances create "$K8S_WORKER_INSTANCE_NAME" \
+    --project="$PROJECT_ID" \
+    --zone="$ZONE" \
+    --machine-type="$WORKER_MACHINE_TYPE" \
+    --subnet="$SUBNET_NAME" \
+    --image-family="$IMAGE_FAMILY" \
+    --image-project="$IMAGE_PROJECT" \
+    --boot-disk-size="$WORKER_BOOT_DISK_SIZE" \
+    --address="$K8S_WORKER_IP_NAME" \
+    --tags=ssh-access,k8s-worker-node \
+    --description="VM for Kubernetes Worker Node"
+else
+  echo "Instance '$K8S_WORKER_INSTANCE_NAME' already exists. Skipping creation."
+fi
+
+# 7. Output External IPs
+echo "--- External IP Addresses ---"
+K8S_MASTER_EXTERNAL_IP=$(gcloud compute instances describe "$K8S_MASTER_INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+K8S_WORKER_EXTERNAL_IP=$(gcloud compute instances describe "$K8S_WORKER_INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+echo "K8s Master External IP: $K8S_MASTER_EXTERNAL_IP"
+echo "K8s Worker External IP: $K8S_WORKER_EXTERNAL_IP"
+
+echo "--- GCP Kubernetes Cluster Setup (Single VPC) Complete ---"
+echo "Remember to run the 'kubeadm init' command on the master node and 'kubeadm join' on the worker node(s) after this setup."
+

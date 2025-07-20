@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# --- Simple SonarQube Installation Script for Debian ---
+
+echo "--- Starting SonarQube Installation ---"
+echo "This script will install Java and SonarQube."
+echo "It assumes a fresh Debian-based system."
+echo ""
+
+# --- Step 1: Update System Packages ---
+echo "--- Step 1: Updating System Packages ---"
+echo "This ensures your system has the latest package information."
+sudo apt update -y
+echo "System packages updated."
+echo ""
+
+# --- Step 2: Install Java (OpenJDK 17) and Unzip ---
+echo "--- Step 2: Installing Java (OpenJDK 17) and Unzip ---"
+echo "Java is required for SonarQube. Unzip is needed to extract the SonarQube archive."
+sudo apt install fontconfig openjdk-17-jre unzip -y
+echo "Java and Unzip installed. Verifying Java version:"
+java -version
+echo "Java and Unzip installation complete."
+echo ""
+
+# --- Step 3: Download and Extract SonarQube ---
+echo "--- Step 3: Downloading and Extracting SonarQube ---"
+echo "SonarQube is a code quality and security analysis platform."
+
+SONARQUBE_VERSION="9.9.8.100196" # Using the version you previously provided
+SONARQUBE_ZIP="sonarqube-${SONARQUBE_VERSION}.zip"
+SONARQUBE_DOWNLOAD_URL="https://binaries.sonarsource.com/Distribution/sonarqube/${SONARQUBE_ZIP}"
+SONARQUBE_EXTRACTED_DIR="/opt/sonarqube-${SONARQUBE_VERSION}"
+SONARQUBE_HOME_SYMLINK="/opt/sonarqube"
+INSTALL_DIR="/opt"
+
+echo "Downloading SonarQube ${SONARQUBE_VERSION}..."
+sudo wget "${SONARQUBE_DOWNLOAD_URL}" -P /tmp
+
+echo "Unzipping SonarQube to /opt/..."
+sudo unzip "/tmp/${SONARQUBE_ZIP}" -d "${INSTALL_DIR}"
+
+echo "Creating a simple link for SonarQube at /opt/sonarqube..."
+sudo ln -sfn "${SONARQUBE_EXTRACTED_DIR}" "${SONARQUBE_HOME_SYMLINK}"
+echo "SonarQube extraction and linking complete."
+echo ""
+
+# --- Step 4: Create Sonar User and Set Permissions ---
+echo "--- Step 4: Creating Sonar User and Setting Permissions ---"
+echo "SonarQube should run as a dedicated, non-root user for security."
+
+SONAR_USER="sonar"
+SONAR_GROUP="sonar"
+
+echo "Creating a system user for SonarQube: '${SONAR_USER}'..."
+sudo adduser --system --no-create-home --group "${SONAR_USER}"
+
+echo "Setting ownership and permissions for SonarQube directories..."
+sudo chown -R "${SONAR_USER}":"${SONAR_GROUP}" "${SONARQUBE_EXTRACTED_DIR}"
+sudo chmod -R 755 "${SONARQUBE_EXTRACTED_DIR}"
+echo "User creation and permissions setup complete."
+echo ""
+
+# --- Step 5: Configure System Settings for SonarQube (Elasticsearch requirements) ---
+echo "--- Step 5: Configuring System Settings for SonarQube ---"
+echo "These settings are crucial for SonarQube's Elasticsearch component to run correctly."
+
+echo "Updating kernel parameters (vm.max_map_count, fs.file-max)..."
+sudo tee -a /etc/sysctl.conf > /dev/null <<EOF
+vm.max_map_count=524288
+fs.file-max=131072
+EOF
+
+echo "Applying kernel parameter changes immediately..."
+sudo sysctl --system
+
+echo "Updating user limits for the '${SONAR_USER}' user (nofile, nproc)..."
+sudo tee -a /etc/security/limits.conf > /dev/null <<EOF
+${SONAR_USER} - nofile 131072
+${SONAR_USER} - nproc 8192
+EOF
+echo "System settings configuration complete."
+echo ""
+
+# --- Step 6: Create Systemd Service for SonarQube ---
+echo "--- Step 6: Creating Systemd Service for SonarQube ---"
+echo "This allows you to manage SonarQube like any other system service."
+
+sudo tee /etc/systemd/system/sonarqube.service > /dev/null <<EOF
+[Unit]
+Description=SonarQube Service
+After=syslog.target network.target
+
+[Service]
+Type=forking
+User=${SONAR_USER}
+Group=${SONAR_GROUP}
+PermissionsStartOnly=true
+ExecStart=${SONARQUBE_HOME_SYMLINK}/bin/linux-x86-64/sonar.sh start
+ExecStop=${SONARQUBE_HOME_SYMLINK}/bin/linux-x86-64/sonar.sh stop
+StandardOutput=syslog
+LimitNOFILE=65536
+LimitNPROC=4096
+TimeoutStartSec=300
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+echo "Systemd service file created."
+echo ""
+
+# --- Step 7: Start and Enable SonarQube Service ---
+echo "--- Step 7: Starting and Enabling SonarQube Service ---"
+echo "SonarQube will now start and be configured to launch on system boot."
+
+echo "Reloading systemd daemon to recognize the new service..."
+sudo systemctl daemon-reload
+
+echo "Enabling SonarQube service..."
+sudo systemctl enable sonarqube
+
+echo "Starting SonarQube service..."
+sudo systemctl start sonarqube
+
+echo "Checking SonarQube service status (it might take a few minutes to fully start):"
+sudo systemctl status sonarqube
+echo "SonarQube service management complete."
+echo ""
+
+echo "--- SonarQube Installation Finished! ---"
+echo "Next Steps:"
+echo "1. Access SonarQube: Open your server's public IP on port 9000 in a web browser (e.g., http://YOUR_SERVER_IP:9000/)."
+echo "2. Initial Login: Default admin credentials are admin/admin."
+echo "3. Important: For production, configure SonarQube to use an external database (e.g., PostgreSQL) instead of the embedded H2 database."
+echo ""
+echo "Important Note: Ensure port 9000 is open in your firewall rules for external access."
+

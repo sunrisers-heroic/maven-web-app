@@ -1,0 +1,148 @@
+#!/bin/bash
+
+# --- Simple Jenkins, Maven, Docker, Kubectl Installation Script for Debian ---
+
+echo "--- Starting All Tools Installation ---"
+echo "This script will install Java, Maven, Docker, Kubectl, and Jenkins."
+echo "It assumes a fresh Debian-based system."
+echo ""
+
+# --- Step 1: Update System Packages ---
+echo "--- Step 1: Updating System Packages ---"
+echo "This ensures your system has the latest package information."
+sudo apt update -y
+echo "System packages updated."
+echo ""
+
+# --- Step 2: Install Java (OpenJDK 17) ---
+echo "--- Step 2: Installing Java (OpenJDK 17) ---"
+echo "Java is required for both Maven and Jenkins."
+sudo apt install fontconfig openjdk-17-jre -y
+echo "Java installed. Verifying version:"
+java -version
+echo "Java installation complete."
+echo ""
+
+# Define Java Home Path for Maven (common path for OpenJDK 17 on Debian)
+# This path is generally correct for OpenJDK 17 installed via apt.
+JAVA_HOME_PATH="/usr/lib/jvm/java-17-openjdk-amd64"
+
+# --- Step 3: Install Maven ---
+echo "--- Step 3: Installing Maven ---"
+echo "Maven is a build automation tool for Java projects."
+
+MAVEN_VERSION="3.9.10"
+MAVEN_TAR_GZ="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+MAVEN_DOWNLOAD_URL="https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/${MAVEN_TAR_GZ}"
+MAVEN_EXTRACTED_DIR="/opt/apache-maven-${MAVEN_VERSION}"
+MAVEN_HOME_SYMLINK="/opt/maven"
+INSTALL_DIR="/opt"
+
+echo "Downloading Maven ${MAVEN_VERSION}..."
+sudo wget "${MAVEN_DOWNLOAD_URL}" -P /tmp
+
+echo "Extracting Maven to /opt/..."
+sudo tar xvzf "/tmp/${MAVEN_TAR_GZ}" -C "${INSTALL_DIR}"
+
+echo "Creating a simple link for Maven at /opt/maven..."
+sudo ln -sfn "${MAVEN_EXTRACTED_DIR}" "${MAVEN_HOME_SYMLINK}"
+
+echo "Setting up Maven environment variables..."
+sudo tee /etc/profile.d/maven.sh > /dev/null <<EOF
+# Apache Maven Environmental Variables
+export JAVA_HOME=${JAVA_HOME_PATH}
+export M2_HOME=${MAVEN_HOME_SYMLINK}
+export MAVEN_HOME=${MAVEN_HOME_SYMLINK}
+export PATH=\${M2_HOME}/bin:\${PATH}
+EOF
+
+echo "Making Maven environment script executable..."
+sudo chmod 755 /etc/profile.d/maven.sh
+
+echo "Applying Maven environment variables for this session..."
+source /etc/profile.d/maven.sh
+
+echo "Verifying Maven installation:"
+mvn -version
+echo "Maven installation complete."
+echo ""
+
+# --- Step 4: Install Docker ---
+echo "--- Step 4: Installing Docker ---"
+echo "Docker is used for containerization."
+
+echo "Installing Docker from Debian's repositories..."
+sudo apt install docker.io docker-compose-plugin -y
+echo "Docker installed."
+
+echo "Enabling Docker to start automatically on boot..."
+sudo systemctl enable docker
+
+echo "Starting Docker service..."
+sudo systemctl start docker
+
+echo "Verifying Docker installation:"
+sudo docker version --format '{{.Server.Version}}'
+echo "Docker installation complete."
+echo ""
+
+# --- Step 5: Install Kubectl ---
+echo "--- Step 5: Installing Kubectl ---"
+echo "Kubectl is the command-line tool for Kubernetes clusters."
+
+echo "Installing kubectl from Debian's repositories..."
+sudo apt install kubectl -y
+echo "Kubectl installed."
+
+echo "Verifying Kubectl installation:"
+kubectl version --client --short
+echo "Kubectl installation complete."
+echo ""
+
+# --- Step 6: Install Jenkins ---
+echo "--- Step 6: Installing Jenkins ---"
+echo "Jenkins is an automation server for CI/CD."
+
+JENKINS_USER="jenkins"
+JENKINS_GROUP="jenkins"
+
+echo "Creating a system user for Jenkins: '${JENKINS_USER}'..."
+sudo adduser --system --no-create-home --group "${JENKINS_USER}"
+
+echo "Adding the Jenkins user to the 'docker' group..."
+# This allows Jenkins to run Docker commands without needing sudo.
+sudo usermod -aG docker "${JENKINS_USER}"
+
+echo "Downloading Jenkins GPG key..."
+sudo mkdir -p /usr/share/keyrings
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo gpg --dearmor -o /usr/share/keyrings/jenkins-keyring.asc
+
+echo "Adding Jenkins repository to your system's sources..."
+echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+echo "Updating package lists again to include Jenkins repository..."
+sudo apt update -y
+
+echo "Installing Jenkins package..."
+sudo apt install jenkins -y
+echo "Jenkins installed."
+
+echo "Enabling Jenkins to start automatically on boot..."
+sudo systemctl enable jenkins
+
+echo "Starting Jenkins service..."
+sudo systemctl start jenkins
+
+echo "Checking Jenkins service status (it might take a moment to fully start):"
+sudo systemctl status jenkins
+echo "Jenkins installation complete."
+echo ""
+
+echo "--- All Tools Setup Finished! ---"
+echo "Next Steps:"
+echo "1. Access Jenkins: Open your server's public IP on port 8080 in a web browser (e.g., http://YOUR_SERVER_IP:8080/)."
+echo "2. Get Initial Admin Password: Run 'sudo cat /var/lib/jenkins/secrets/initialAdminPassword' on your server and paste it into the Jenkins setup wizard."
+echo "3. Complete Jenkins Setup: Follow the on-screen instructions to create your admin user and install plugins."
+echo ""
+echo "Important Note: For the '${JENKINS_USER}' user to fully use Docker without 'sudo', you might need to log out and log back into your server, or simply reboot the VM."
+

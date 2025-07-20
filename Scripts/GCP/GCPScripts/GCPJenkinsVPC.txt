@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# --- Configuration Variables ---
+PROJECT_ID="graceful-castle-459606-e9"
+REGION="us-central1"
+ZONE="us-central1-a"
+
+# Network Configuration
+VPC_NETWORK_NAME="jenkins-main-vpc"
+SUBNET_NAME="jenkins-main-subnet"
+SUBNET_CIDR_RANGE="10.1.0.0/24" # Unique CIDR for this VPC
+
+# Instance Configuration
+JENKINS_INSTANCE_NAME="jenkins-server-main"
+MACHINE_TYPE="e2-medium"
+BOOT_DISK_SIZE="25GB" # As per your request
+IMAGE_FAMILY="debian-12"
+IMAGE_PROJECT="debian-cloud"
+
+# Static IP Name
+JENKINS_IP_NAME="jenkins-main-static-ip"
+
+echo "--- Starting GCP Jenkins Main Server VPC Setup ---"
+echo "Project: $PROJECT_ID | Region: $REGION | Zone: $ZONE"
+
+# 1. Delete existing static IP
+echo "--- Checking and Deleting Existing Static IP: $JENKINS_IP_NAME ---"
+if gcloud compute addresses describe "$JENKINS_IP_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Deleting static IP: $JENKINS_IP_NAME"
+  gcloud compute addresses delete "$JENKINS_IP_NAME" --region="$REGION" --project="$PROJECT_ID" --quiet
+else
+  echo "Static IP $JENKINS_IP_NAME not found. Skipping deletion."
+fi
+
+# 2. Create VPC Network
+echo "--- Creating VPC Network: $VPC_NETWORK_NAME ---"
+if ! gcloud compute networks describe "$VPC_NETWORK_NAME" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks create "$VPC_NETWORK_NAME" \
+    --project="$PROJECT_ID" \
+    --subnet-mode=custom \
+    --description="VPC for Main Jenkins CI/CD server"
+  echo "VPC Network '$VPC_NETWORK_NAME' created."
+else
+  echo "VPC Network '$VPC_NETWORK_NAME' already exists. Skipping creation."
+fi
+
+# 3. Create Subnet within the VPC
+echo "--- Creating Subnet: $SUBNET_NAME in $REGION ---"
+if ! gcloud compute networks subnets describe "$SUBNET_NAME" --network="$VPC_NETWORK_NAME" --region="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  gcloud compute networks subnets create "$SUBNET_NAME" \
+    --project="$PROJECT_ID" \
+    --network="$VPC_NETWORK_NAME" \
+    --region="$REGION" \
+    --range="$SUBNET_CIDR_RANGE" \
+    --description="Subnet for Main Jenkins instance"
+  echo "Subnet '$SUBNET_NAME' created."
+else
+  echo "Subnet '$SUBNET_NAME' already exists. Skipping creation."
+fi
+
+# 4. Create Firewall Rules
+echo "--- Creating Firewall Rules ---"
+# Allow SSH
+gcloud compute firewall-rules create "allow-ssh-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:22 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=ssh-access \
+  --description="Allow SSH access" --quiet || echo "SSH firewall rule exists/failed to create."
+
+# Allow Jenkins port (8080)
+gcloud compute firewall-rules create "allow-jenkins-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp:8080 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags=jenkins-server \
+  --description="Allow Jenkins access (port 8080)" --quiet || echo "Jenkins firewall rule exists/failed to create."
+
+# Allow internal communication
+gcloud compute firewall-rules create "allow-internal-$VPC_NETWORK_NAME" \
+  --project="$PROJECT_ID" \
+  --network="$VPC_NETWORK_NAME" \
+  --action=ALLOW \
+  --rules=tcp,udp,icmp \
+  --source-ranges="$SUBNET_CIDR_RANGE" \
+  --description="Allow all internal traffic within the VPC subnet" --quiet || echo "Internal firewall rule exists/failed to create."
+
+# 5. Create new Static External IP Address for Jenkins
+echo "--- Creating New Static External IP Address for Jenkins ---"
+gcloud compute addresses create "$JENKINS_IP_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --description="Static IP for Main Jenkins" || echo "Jenkins static IP exists/failed to create."
+
+# 6. Create Jenkins Instance and Assign Static IP
+echo "--- Creating Jenkins Instance and Assigning Static IP ---"
+if ! gcloud compute instances describe "$JENKINS_INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" > /dev/null 2>&1; then
+  echo "Creating Jenkins instance: $JENKINS_INSTANCE_NAME..."
+  gcloud compute instances create "$JENKINS_INSTANCE_NAME" \
+    --project="$PROJECT_ID" \
+    --zone="$ZONE" \
+    --machine-type="$MACHINE_TYPE" \
+    --subnet="$SUBNET_NAME" \
+    --image-family="$IMAGE_FAMILY" \
+    --image-project="$IMAGE_PROJECT" \
+    --boot-disk-size="$BOOT_DISK_SIZE" \
+    --address="$JENKINS_IP_NAME" \
+    --tags=ssh-access,jenkins-server \
+    --description="VM for Main Jenkins CI/CD"
+else
+  echo "Instance '$JENKINS_INSTANCE_NAME' already exists. Skipping creation."
+fi
+
+# 7. Output External IP
+echo "--- External IP Address ---"
+JENKINS_EXTERNAL_IP=$(gcloud compute instances describe "$JENKINS_INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+echo "Main Jenkins External IP: $JENKINS_EXTERNAL_IP"
+
+echo "--- GCP Jenkins Main Server VPC Setup Complete ---"
+

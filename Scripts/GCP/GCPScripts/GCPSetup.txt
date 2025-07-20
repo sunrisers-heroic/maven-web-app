@@ -1,0 +1,123 @@
+Project Setup Checklist (GCP Edition):
+
+Step-1: Jenkins Server Setup in GCP Debian VM
+
+Create a Debian VM instance in GCP Compute Engine (e.g., e2-medium).
+
+Ensure necessary firewall rules are enabled for Jenkins (port 8080) and SSH (port 22).
+
+Connect to the VM via gcloud compute ssh or an SSH client.
+
+Install Java (OpenJDK 17).
+
+Install Jenkins by adding its GPG key and repository, then installing the package.
+
+Start and enable the Jenkins service.
+
+Access Jenkins in your browser using the VM's external IP and port 8080.
+
+Retrieve the initial admin password from the server logs.
+
+Complete the Jenkins setup wizard, create an admin account, and install suggested/required plugins.
+
+Step-2: Configure Maven as Global Tool in Jenkins
+
+In the Jenkins UI, navigate to "Manage Jenkins" -> "Tools".
+
+Add a Maven installation, choosing to install it automatically.
+
+Step-3: Setup Docker in Jenkins
+
+On the Jenkins server VM, install Docker (using apt install docker.io).
+
+Add the jenkins user to the docker group to enable Docker command execution without sudo.
+
+Restart the Jenkins service for group changes to take effect.
+
+Step - 4: Create GKE Management Host in GCP
+
+Launch a new Debian VM instance in GCP Compute Engine (e.g., e2-micro).
+
+Connect to this VM.
+
+Install kubectl.
+
+Ensure gcloud CLI is installed and configured.
+
+Step - 5: Create IAM Service Account & Attach to GKE Management Host & Jenkins Server
+
+Create a new IAM Service Account in GCP with roles like Kubernetes Engine Admin, Compute Instance Admin, Compute Network Admin, Service Account User, and Storage Admin.
+
+Stop both your Jenkins server VM and GKE Management Host VM.
+
+Edit both VM instances and attach the newly created Service Account under "Identity and API access".
+
+Start both VMs.
+
+Step - 6: Create GKE Cluster using gcloud
+
+SSH into your GKE Management Host.
+
+Use the gcloud container clusters create command to provision your GKE cluster.
+
+Verify cluster nodes using kubectl get nodes.
+
+Step - 7: Install Google Cloud CLI (gcloud CLI) in JENKINS Server
+
+SSH into your Jenkins server.
+
+Install google-cloud-cli if not already present.
+
+Step - 8: Install Kubectl in JENKINS Server
+
+SSH into your Jenkins server.
+
+Install kubectl.
+
+Step - 9: Update GKE Cluster Config File in Jenkins Server
+
+From your GKE Management Host, use gcloud container clusters get-credentials to generate the kubeconfig.
+
+Copy the content of ~/.kube/config from the GKE Management Host.
+
+On the Jenkins server, create a .kube directory in /var/lib/jenkins/ and ~ (for your SSH user).
+
+Paste the copied kubeconfig content into /var/lib/jenkins/.kube/config (owned by jenkins user) and ~/.kube/config (for your SSH user).
+
+Verify GKE nodes from the Jenkins server using kubectl get nodes.
+
+Step - 10: Create Jenkins CI Job
+
+Configure a Jenkins job with stages for:
+
+Cloning your Git repository.
+
+Building your application with Maven (mvn clean install).
+
+Creating a Docker image (docker build).
+
+Pushing the Docker image to GCP Container Registry or Artifact Registry (after authenticating Docker).
+
+Triggering the CD job.
+
+Step - 11: Create Jenkins CD Job
+
+Configure a separate Jenkins job with stages for:
+
+Cloning your Kubernetes manifest files repository.
+
+Deploying the application to your GKE cluster (kubectl apply -f ...).
+
+Step - 12: Trigger Jenkins CI Job
+
+Run your CI job, which will automate the build, image creation, push, and then trigger the CD job for deployment.
+
+Step - 13: Access Application in Browser
+
+After deployment, retrieve the external IP of your Kubernetes Service (if it's a LoadBalancer type).
+
+Access your application using the Load Balancer IP.
+
+Step - 14: Clean Up GCP Resources
+
+Remember to delete all created resources (GKE cluster, VM instances, static IPs, firewall rules, VPC network, service accounts) to avoid ongoing billing.
